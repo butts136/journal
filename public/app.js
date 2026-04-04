@@ -1,6 +1,7 @@
 (function () {
   const THUMB_CACHE_PREFIX = "journal-thumb:v1:";
   const thumbMemoryCache = new Map();
+  const basePath = document.body ? document.body.dataset.basePath || "" : "";
 
   if (window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -8,6 +9,22 @@
   }
 
   const cards = Array.from(document.querySelectorAll(".journal-card[data-pdf-url]"));
+
+  function withBasePath(target) {
+    if (!basePath) {
+      return target;
+    }
+
+    if (!target || /^https?:\/\//i.test(target)) {
+      return target;
+    }
+
+    if (target.startsWith(basePath)) {
+      return target;
+    }
+
+    return `${basePath}${target.startsWith("/") ? target : `/${target}`}`;
+  }
 
   function getThumbCacheKey(pdfUrl) {
     return `${THUMB_CACHE_PREFIX}${pdfUrl}`;
@@ -75,7 +92,7 @@
     card.dataset.thumbSaved = "1";
 
     try {
-      const response = await fetch("/api/thumbnail", {
+      const response = await fetch(withBasePath("/api/thumbnail"), {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -166,7 +183,7 @@
   }
 
   if (window.EventSource) {
-    const stream = new EventSource("/events");
+    const stream = new EventSource(withBasePath("/events"));
     let timer = null;
 
     const softReload = () => {

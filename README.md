@@ -46,6 +46,12 @@ npm install
 npm start
 ```
 
+Ou, avec le lanceur simple :
+
+```bash
+python3 /chemin/vers/app.py
+```
+
 Puis ouvre :
 
 ```text
@@ -57,9 +63,28 @@ Au premier lancement, ouvre `/setup` pour definir le mot de passe administrateur
 ## Variables d'environnement
 
 - `PORT` : port HTTP
+- `APP_BASE_PATH` : prefixe URL si l'app est servie derriere un reverse proxy, par exemple `/journal`
 - `JOURNAL_DB_PATH` : chemin SQLite
 - `JOURNAL_STORAGE_DIR` : dossier des PDF telecharges
 - `DEFAULT_RSS_FEEDS` : flux RSS/Torznab separes par virgule ou retour ligne
+
+## Reverse Proxy Nginx
+
+Exemple pour exposer l'application sous `/journal/` :
+
+```nginx
+location /journal/ {
+    proxy_pass http://127.0.0.1:39014/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Prefix /journal;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
+La valeur de `X-Forwarded-Prefix` doit correspondre au prefixe reel expose par Nginx.
 
 ## Docker
 

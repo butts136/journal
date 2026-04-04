@@ -24,6 +24,7 @@ const STORAGE_ROOT =
 const PUBLIC_ROOT = path.join(process.cwd(), "public");
 const PDFJS_URL =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+const DEFAULT_BASE_PATH = normalizeBasePath(process.env.APP_BASE_PATH || "");
 
 const runtime = {
   db: null,
@@ -137,6 +138,16 @@ function loadEnvFile(filePath) {
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function normalizeBasePath(value) {
+  const raw = String(value || "").trim();
+
+  if (!raw || raw === "/") {
+    return "";
+  }
+
+  return `/${raw.replace(/^\/+|\/+$/g, "")}`;
 }
 
 function normalizeText(value) {
@@ -652,12 +663,44 @@ function resolveManagedPath(relativePath) {
   return absolutePath;
 }
 
-function toManagedFileUrl(relativePath) {
+function toManagedFileUrl(relativePath, basePath = "") {
   if (!relativePath) {
     return null;
   }
 
-  return `/files/${relativePath.split("/").map(encodeURIComponent).join("/")}`;
+  return withBasePath(basePath, `/files/${relativePath.split("/").map(encodeURIComponent).join("/")}`);
+}
+
+function getBasePath(request) {
+  const forwardedPrefix = request && request.headers ? request.headers["x-forwarded-prefix"] : "";
+  return normalizeBasePath(forwardedPrefix || DEFAULT_BASE_PATH);
+}
+
+function withBasePath(basePath, target = "/") {
+  if (!target) {
+    return basePath || "/";
+  }
+
+  if (/^https?:\/\//i.test(target)) {
+    return target;
+  }
+
+  const normalizedBasePath = normalizeBasePath(basePath);
+  const normalizedTarget = target.startsWith("/") ? target : `/${target}`;
+
+  if (!normalizedBasePath) {
+    return normalizedTarget;
+  }
+
+  if (normalizedTarget === "/") {
+    return `${normalizedBasePath}/`;
+  }
+
+  if (normalizedTarget.startsWith(`${normalizedBasePath}/`) || normalizedTarget === normalizedBasePath) {
+    return normalizedTarget;
+  }
+
+  return `${normalizedBasePath}${normalizedTarget}`;
 }
 
 function buildThumbnailRelativePath(pdfRelativePath) {
@@ -1209,7 +1252,7 @@ function isAdminAuthenticated(request) {
   return Boolean(payload && payload.role === "admin");
 }
 
-function adminCookieHeader() {
+function adminCookieHeader(basePath = "") {
   const token = createSignedCookie(
     {
       role: "admin",
@@ -1218,13 +1261,15 @@ function adminCookieHeader() {
     getAppConfig().sessionSecret,
   );
 
+  const cookiePath = withBasePath(basePath, "/");
+
   return `${AUTH_COOKIE_NAME}=${encodeURIComponent(
     token,
-  )}; HttpOnly; Path=/; SameSite=Lax; Max-Age=1209600`;
+  )}; HttpOnly; Path=${cookiePath}; SameSite=Lax; Max-Age=1209600`;
 }
 
-function clearAdminCookieHeader() {
-  return `${AUTH_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`;
+function clearAdminCookieHeader(basePath = "") {
+  return `${AUTH_COOKIE_NAME}=; HttpOnly; Path=${withBasePath(basePath, "/")}; SameSite=Lax; Max-Age=0`;
 }
 
 function sendHtml(response, statusCode, html, headers = {}) {
@@ -1272,9 +1317,9 @@ function getFlash(searchParams) {
   return `<div class="flash flash-${escapeHtml(type)}">${escapeHtml(text)}</div>`;
 }
 
-function renderShell({ title, body, currentPath = "/", scripts = [], bodyClass = "" }) {
+function renderShell({ title, body, currentPath = "/", scripts = [], bodyClass = "", basePath = "" }) {
   const configured = isConfigured();
-  const settingsHref = configured ? "/settings" : "/setup";
+  const settingsHref = configured ? withBasePath(basePath, "/settings") : withBasePath(basePath, "/setup");
 
   return `<!doctype html>
 <html lang="fr">
@@ -1282,12 +1327,12 @@ function renderShell({ title, body, currentPath = "/", scripts = [], bodyClass =
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(title)} | ${APP_NAME}</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="${escapeHtml(withBasePath(basePath, "/static/styles.css"))}" />
   </head>
-  <body class="${escapeHtml(bodyClass)}">
+  <body class="${escapeHtml(bodyClass)}" data-base-path="${escapeHtml(basePath)}">
     <div class="page-shell">
       <header class="topbar">
-        <a class="brand" href="/">
+        <a class="brand" href="${escapeHtml(withBasePath(basePath, "/"))}">
           <span class="brand-mark">LK</span>
           <span>
             <strong>${APP_NAME}</strong>
@@ -1295,22 +1340,23 @@ function renderShell({ title, body, currentPath = "/", scripts = [], bodyClass =
           </span>
         </a>
         <nav class="nav">
-          <a class="${currentPath === "/" ? "is-active" : ""}" href="/">Accueil</a>
-          <a class="${currentPath === "/archives" ? "is-active" : ""}" href="/archives">Archives</a>
+          <a class="${currentPath === "/" ? "is-active" : ""}" href="${escapeHtml(withBasePath(basePath, "/"))}">Accueil</a>
+          <a class="${currentPath === "/archives" ? "is-active" : ""}" href="${escapeHtml(withBasePath(basePath, "/archives"))}">Archives</a>
           <a class="${currentPath === "/settings" || currentPath === "/setup" ? "is-active" : ""}" href="${settingsHref}">Parametres</a>
         </nav>
       </header>
       <main class="page-content">${body}</main>
     </div>
-    ${scripts.map((src) => `<script src="${src}"></script>`).join("\n")}
+    ${scripts.map((src) => `<script src="${escapeHtml(withBasePath(basePath, src))}"></script>`).join("\n")}
   </body>
 </html>`;
 }
 
 function renderJournalCard(journal, options = {}) {
-  const pdfUrl = toManagedFileUrl(journal.pdf_relative_path);
+  const basePath = options.basePath || "";
+  const pdfUrl = toManagedFileUrl(journal.pdf_relative_path, basePath);
   const thumbRelativePath = getJournalThumbnailRelativePath(journal);
-  const thumbUrl = toManagedFileUrl(thumbRelativePath);
+  const thumbUrl = toManagedFileUrl(thumbRelativePath, basePath);
   const date = parseDateKey(journal.publication_date);
   const meta = [
     date ? formatFrenchDate(date) : journal.publication_date,
@@ -1324,7 +1370,7 @@ function renderJournalCard(journal, options = {}) {
     classes.push("is-featured");
   }
 
-  return `<a class="${classes.join(" ")}" href="/journal/${journal.id}" data-journal-id="${journal.id}" data-pdf-url="${escapeHtml(
+  return `<a class="${classes.join(" ")}" href="${escapeHtml(withBasePath(basePath, `/journal/${journal.id}`))}" data-journal-id="${journal.id}" data-pdf-url="${escapeHtml(
     pdfUrl || "",
   )}" data-thumb-url="${escapeHtml(thumbUrl || "")}">
     <div class="journal-thumb">
@@ -1339,7 +1385,7 @@ function renderJournalCard(journal, options = {}) {
   </a>`;
 }
 
-function renderJournalGrid(journals) {
+function renderJournalGrid(journals, basePath = "") {
   if (!journals.length) {
     return `<div class="empty-state">
       <strong>Aucun journal pret.</strong>
@@ -1348,25 +1394,26 @@ function renderJournalGrid(journals) {
   }
 
   return `<div class="journal-grid">${journals
-    .map((journal, index) => renderJournalCard(journal, { featured: index === 0 }))
+    .map((journal, index) => renderJournalCard(journal, { featured: index === 0, basePath }))
     .join("")}</div>`;
 }
 
-function renderHomePage(searchParams) {
+function renderHomePage(searchParams, basePath) {
   const journals = getRecentJournals();
 
   return renderShell({
     title: "Accueil",
     currentPath: "/",
     bodyClass: "catalog-body",
+    basePath,
     scripts: [PDFJS_URL, "/static/app.js"],
     body: `
       ${getFlash(searchParams)}
       <section class="section-head">
         <h2>Dernieres editions</h2>
-        <a href="/archives">Voir les archives</a>
+        <a href="${escapeHtml(withBasePath(basePath, "/archives"))}">Voir les archives</a>
       </section>
-      ${renderJournalGrid(journals)}
+      ${renderJournalGrid(journals, basePath)}
     `,
   });
 }
@@ -1398,7 +1445,7 @@ function groupArchivedJournals(journals) {
   return groups;
 }
 
-function renderArchivesPage(searchParams) {
+function renderArchivesPage(searchParams, basePath) {
   const groups = groupArchivedJournals(getArchivedJournals());
   const sections = [...groups.entries()]
     .sort((left, right) => Number(right[0]) - Number(left[0]))
@@ -1406,7 +1453,7 @@ function renderArchivesPage(searchParams) {
       const monthBlocks = [...months.entries()].map(
         ([month, journals]) => `<section class="archive-month">
           <h3>${escapeHtml(month)}</h3>
-          ${renderJournalGrid(journals)}
+          ${renderJournalGrid(journals, basePath)}
         </section>`,
       );
 
@@ -1421,6 +1468,7 @@ function renderArchivesPage(searchParams) {
     title: "Archives",
     currentPath: "/archives",
     bodyClass: "catalog-body",
+    basePath,
     scripts: [PDFJS_URL, "/static/app.js"],
     body: `
       <section class="hero hero-compact">
@@ -1436,7 +1484,7 @@ function renderArchivesPage(searchParams) {
   });
 }
 
-function renderSetupPage(searchParams) {
+function renderSetupPage(searchParams, basePath) {
   if (isConfigured()) {
     return null;
   }
@@ -1444,13 +1492,14 @@ function renderSetupPage(searchParams) {
   return renderShell({
     title: "Configuration initiale",
     currentPath: "/setup",
+    basePath,
     body: `
       <section class="panel narrow">
         <span class="eyebrow">Premier lancement</span>
         <h1>Choisir le mot de passe administrateur</h1>
         <p>Il sera chiffre localement avec <code>scrypt</code> et servira a proteger les Parametres.</p>
         ${getFlash(searchParams)}
-        <form method="post" action="/setup" class="stack-form">
+        <form method="post" action="${escapeHtml(withBasePath(basePath, "/setup"))}" class="stack-form">
           <label>Mot de passe
             <input type="password" name="password" required minlength="8" autocomplete="new-password" />
           </label>
@@ -1464,7 +1513,7 @@ function renderSetupPage(searchParams) {
   });
 }
 
-function renderSettingsPage(request, searchParams) {
+function renderSettingsPage(request, searchParams, basePath) {
   if (!isConfigured()) {
     return null;
   }
@@ -1473,12 +1522,13 @@ function renderSettingsPage(request, searchParams) {
     return renderShell({
       title: "Connexion admin",
       currentPath: "/settings",
+      basePath,
       body: `
         <section class="panel narrow">
           <span class="eyebrow">Zone protegee</span>
           <h1>Connexion administrateur</h1>
           ${getFlash(searchParams)}
-          <form method="post" action="/login" class="stack-form">
+          <form method="post" action="${escapeHtml(withBasePath(basePath, "/login"))}" class="stack-form">
             <label>Mot de passe
               <input type="password" name="password" required autocomplete="current-password" />
             </label>
@@ -1497,6 +1547,7 @@ function renderSettingsPage(request, searchParams) {
   return renderShell({
     title: "Parametres",
     currentPath: "/settings",
+    basePath,
     body: `
       <section class="hero hero-compact">
         <div>
@@ -1515,14 +1566,14 @@ function renderSettingsPage(request, searchParams) {
       <div class="settings-grid">
         <section class="panel">
           <h2>Termes de recherche</h2>
-          <form method="post" action="/settings/search-terms" class="inline-form">
+          <form method="post" action="${escapeHtml(withBasePath(basePath, "/settings/search-terms"))}" class="inline-form">
             <input type="text" name="label" placeholder="Journal de Montreal" required />
             <button type="submit">Ajouter</button>
           </form>
           <div class="chip-list">
             ${terms
               .map(
-                (term) => `<form method="post" action="/settings/search-terms/delete" class="chip-form">
+                (term) => `<form method="post" action="${escapeHtml(withBasePath(basePath, "/settings/search-terms/delete"))}" class="chip-form">
                   <input type="hidden" name="id" value="${term.id}" />
                   <span>${escapeHtml(term.label)}</span>
                   <button type="submit">Supprimer</button>
@@ -1533,7 +1584,7 @@ function renderSettingsPage(request, searchParams) {
         </section>
         <section class="panel">
           <h2>Flux RSS / Torznab</h2>
-          <form method="post" action="/settings/feeds" class="stack-form">
+          <form method="post" action="${escapeHtml(withBasePath(basePath, "/settings/feeds"))}" class="stack-form">
             <label>Nom
               <input type="text" name="name" placeholder="Prowlarr #1" required />
             </label>
@@ -1545,7 +1596,7 @@ function renderSettingsPage(request, searchParams) {
           <div class="feed-list">
             ${feeds
               .map(
-                (feed) => `<form method="post" action="/settings/feeds/delete" class="feed-item">
+                (feed) => `<form method="post" action="${escapeHtml(withBasePath(basePath, "/settings/feeds/delete"))}" class="feed-item">
                   <input type="hidden" name="id" value="${feed.id}" />
                   <div>
                     <strong>${escapeHtml(feed.name)}</strong>
@@ -1561,7 +1612,7 @@ function renderSettingsPage(request, searchParams) {
       <section class="panel">
         <h2>Limite de fraicheur</h2>
         <p>Bloque l'ingestion des journaux plus vieux que X jours par rapport a aujourd'hui. Laisse vide pour ne fixer aucune limite.</p>
-        <form method="post" action="/settings/retention" class="inline-form">
+        <form method="post" action="${escapeHtml(withBasePath(basePath, "/settings/retention"))}" class="inline-form">
           <input type="number" min="1" step="1" name="maxJournalAgeDays" value="${escapeHtml(
             config.maxJournalAgeDays ? String(config.maxJournalAgeDays) : "",
           )}" placeholder="30" />
@@ -1571,10 +1622,10 @@ function renderSettingsPage(request, searchParams) {
       <section class="panel">
         <h2>Actions</h2>
         <div class="action-row">
-          <form method="post" action="/settings/scan">
+          <form method="post" action="${escapeHtml(withBasePath(basePath, "/settings/scan"))}">
             <button type="submit">Lancer un scan immediat</button>
           </form>
-          <form method="post" action="/logout">
+          <form method="post" action="${escapeHtml(withBasePath(basePath, "/logout"))}">
             <button type="submit" class="button-secondary">Se deconnecter</button>
           </form>
         </div>
@@ -1583,8 +1634,8 @@ function renderSettingsPage(request, searchParams) {
   });
 }
 
-function renderReaderPage(journal) {
-  const pdfUrl = toManagedFileUrl(journal.pdf_relative_path);
+function renderReaderPage(journal, basePath) {
+  const pdfUrl = toManagedFileUrl(journal.pdf_relative_path, basePath);
 
   return `<!doctype html>
 <html lang="fr">
@@ -1592,13 +1643,13 @@ function renderReaderPage(journal) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(journal.display_title)} | ${APP_NAME}</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="${escapeHtml(withBasePath(basePath, "/static/styles.css"))}" />
   </head>
-  <body class="reader-body">
+  <body class="reader-body" data-base-path="${escapeHtml(basePath)}">
     <div class="reader-screen">
       <header class="reader-toolbar">
         <div class="reader-toolbar-main">
-          <a class="reader-control-button back-link" href="/">Retour</a>
+          <a class="reader-control-button back-link" href="${escapeHtml(withBasePath(basePath, "/"))}">Retour</a>
           <strong class="reader-title">${escapeHtml(journal.display_title)}</strong>
         </div>
         <div class="reader-toolbar-actions">
@@ -1625,7 +1676,7 @@ function renderReaderPage(journal) {
       </main>
     </div>
     <script src="${PDFJS_URL}"></script>
-    <script src="/static/reader.js?v=9"></script>
+    <script src="${escapeHtml(withBasePath(basePath, "/static/reader.js?v=9"))}"></script>
   </body>
 </html>`;
 }
@@ -1706,14 +1757,14 @@ async function serveFile(request, response, filePath) {
   }
 }
 
-function requireAdmin(request, response) {
+function requireAdmin(request, response, basePath) {
   if (!isConfigured()) {
-    redirect(response, "/setup");
+    redirect(response, withBasePath(basePath, "/setup"));
     return false;
   }
 
   if (!isAdminAuthenticated(request)) {
-    redirect(response, "/settings?type=error&message=Connexion%20requise");
+    redirect(response, withBasePath(basePath, "/settings?type=error&message=Connexion%20requise"));
     return false;
   }
 
@@ -1721,20 +1772,22 @@ function requireAdmin(request, response) {
 }
 
 async function handleGet(request, response, url) {
+  const basePath = getBasePath(request);
+
   if (url.pathname === "/") {
-    sendHtml(response, 200, renderHomePage(url.searchParams));
+    sendHtml(response, 200, renderHomePage(url.searchParams, basePath));
     return;
   }
 
   if (url.pathname === "/archives") {
-    sendHtml(response, 200, renderArchivesPage(url.searchParams));
+    sendHtml(response, 200, renderArchivesPage(url.searchParams, basePath));
     return;
   }
 
   if (url.pathname === "/setup") {
-    const html = renderSetupPage(url.searchParams);
+    const html = renderSetupPage(url.searchParams, basePath);
     if (!html) {
-      redirect(response, "/settings");
+      redirect(response, withBasePath(basePath, "/settings"));
       return;
     }
     sendHtml(response, 200, html);
@@ -1742,9 +1795,9 @@ async function handleGet(request, response, url) {
   }
 
   if (url.pathname === "/settings") {
-    const html = renderSettingsPage(request, url.searchParams);
+    const html = renderSettingsPage(request, url.searchParams, basePath);
     if (!html) {
-      redirect(response, "/setup");
+      redirect(response, withBasePath(basePath, "/setup"));
       return;
     }
     sendHtml(response, 200, html);
@@ -1814,7 +1867,7 @@ async function handleGet(request, response, url) {
       return;
     }
 
-    sendHtml(response, 200, renderReaderPage(journal));
+    sendHtml(response, 200, renderReaderPage(journal, basePath));
     return;
   }
 
@@ -1822,6 +1875,8 @@ async function handleGet(request, response, url) {
 }
 
 async function handlePost(request, response, url) {
+  const basePath = getBasePath(request);
+
   if (url.pathname === "/api/thumbnail") {
     const payload = await readJson(request);
     const journalId = Number(payload.journalId);
@@ -1856,39 +1911,42 @@ async function handlePost(request, response, url) {
 
     sendJson(response, 200, {
       ok: true,
-      thumbnailUrl: toManagedFileUrl(thumbnailRelativePath),
+      thumbnailUrl: toManagedFileUrl(thumbnailRelativePath, basePath),
     });
     return;
   }
 
   if (url.pathname === "/setup") {
     if (isConfigured()) {
-      redirect(response, "/settings");
+      redirect(response, withBasePath(basePath, "/settings"));
       return;
     }
 
     const form = await readForm(request);
 
     if (!form.password || String(form.password).length < 8) {
-      redirect(response, "/setup?type=error&message=Mot%20de%20passe%20trop%20court");
+      redirect(response, withBasePath(basePath, "/setup?type=error&message=Mot%20de%20passe%20trop%20court"));
       return;
     }
 
     if (form.password !== form.confirmPassword) {
-      redirect(response, "/setup?type=error&message=La%20confirmation%20ne%20correspond%20pas");
+      redirect(
+        response,
+        withBasePath(basePath, "/setup?type=error&message=La%20confirmation%20ne%20correspond%20pas"),
+      );
       return;
     }
 
     setAdminPassword(form.password);
-    redirect(response, "/settings?type=success&message=Configuration%20terminee", {
-      "Set-Cookie": adminCookieHeader(),
+    redirect(response, withBasePath(basePath, "/settings?type=success&message=Configuration%20terminee"), {
+      "Set-Cookie": adminCookieHeader(basePath),
     });
     return;
   }
 
   if (url.pathname === "/login") {
     if (!isConfigured()) {
-      redirect(response, "/setup");
+      redirect(response, withBasePath(basePath, "/setup"));
       return;
     }
 
@@ -1896,65 +1954,68 @@ async function handlePost(request, response, url) {
     const valid = verifyPassword(String(form.password || ""), getAppConfig().adminPasswordHash);
 
     if (!valid) {
-      redirect(response, "/settings?type=error&message=Mot%20de%20passe%20invalide");
+      redirect(response, withBasePath(basePath, "/settings?type=error&message=Mot%20de%20passe%20invalide"));
       return;
     }
 
-    redirect(response, "/settings?type=success&message=Connexion%20etablie", {
-      "Set-Cookie": adminCookieHeader(),
+    redirect(response, withBasePath(basePath, "/settings?type=success&message=Connexion%20etablie"), {
+      "Set-Cookie": adminCookieHeader(basePath),
     });
     return;
   }
 
   if (url.pathname === "/logout") {
-    redirect(response, "/settings?type=success&message=Session%20fermee", {
-      "Set-Cookie": clearAdminCookieHeader(),
+    redirect(response, withBasePath(basePath, "/settings?type=success&message=Session%20fermee"), {
+      "Set-Cookie": clearAdminCookieHeader(basePath),
     });
     return;
   }
 
-  if (!requireAdmin(request, response)) {
+  if (!requireAdmin(request, response, basePath)) {
     return;
   }
 
   if (url.pathname === "/settings/search-terms") {
     const form = await readForm(request);
     addSearchTerm(form.label);
-    redirect(response, "/settings?type=success&message=Terme%20ajoute");
+    redirect(response, withBasePath(basePath, "/settings?type=success&message=Terme%20ajoute"));
     return;
   }
 
   if (url.pathname === "/settings/search-terms/delete") {
     const form = await readForm(request);
     removeSearchTerm(Number(form.id));
-    redirect(response, "/settings?type=success&message=Terme%20supprime");
+    redirect(response, withBasePath(basePath, "/settings?type=success&message=Terme%20supprime"));
     return;
   }
 
   if (url.pathname === "/settings/feeds") {
     const form = await readForm(request);
     addFeed(form.name, form.url);
-    redirect(response, "/settings?type=success&message=Flux%20ajoute");
+    redirect(response, withBasePath(basePath, "/settings?type=success&message=Flux%20ajoute"));
     return;
   }
 
   if (url.pathname === "/settings/feeds/delete") {
     const form = await readForm(request);
     removeFeed(Number(form.id));
-    redirect(response, "/settings?type=success&message=Flux%20supprime");
+    redirect(response, withBasePath(basePath, "/settings?type=success&message=Flux%20supprime"));
     return;
   }
 
   if (url.pathname === "/settings/scan") {
     triggerScanNow().catch(() => {});
-    redirect(response, "/settings?type=success&message=Scan%20declenche");
+    redirect(response, withBasePath(basePath, "/settings?type=success&message=Scan%20declenche"));
     return;
   }
 
   if (url.pathname === "/settings/retention") {
     const form = await readForm(request);
     setMaxJournalAgeDays(form.maxJournalAgeDays);
-    redirect(response, "/settings?type=success&message=Limite%20de%20fraicheur%20mise%20a%20jour");
+    redirect(
+      response,
+      withBasePath(basePath, "/settings?type=success&message=Limite%20de%20fraicheur%20mise%20a%20jour"),
+    );
     return;
   }
 
