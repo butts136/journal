@@ -536,6 +536,23 @@ body.catalog-body .flash-error {
   min-width: 100%;
 }
 
+.reader-pages.mode-spread {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.reader-spread-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.reader-spread-row.is-cover {
+  justify-content: center;
+}
+
 .reader-sheet {
   flex: 0 0 auto;
   line-height: 0;

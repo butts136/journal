@@ -74,10 +74,26 @@
     updateStatus();
   }
 
+  function moveBy(deltaX, deltaY) {
+    offsetX += deltaX;
+    offsetY += deltaY;
+    applyPan();
+  }
+
   function setMode(mode) {
-    currentMode = mode === "horizontal" ? "horizontal" : "vertical";
-    pagesNode.classList.remove("mode-vertical", "mode-horizontal");
-    pagesNode.classList.add(currentMode === "horizontal" ? "mode-horizontal" : "mode-vertical");
+    currentMode =
+      mode === "horizontal" || mode === "spread"
+        ? mode
+        : "vertical";
+
+    pagesNode.classList.remove("mode-vertical", "mode-horizontal", "mode-spread");
+    pagesNode.classList.add(
+      currentMode === "horizontal"
+        ? "mode-horizontal"
+        : currentMode === "spread"
+          ? "mode-spread"
+          : "mode-vertical",
+    );
 
     modeButtons.forEach((button) => {
       button.classList.toggle("is-active", button.dataset.mode === currentMode);
@@ -91,17 +107,47 @@
   function getFitScale(page) {
     const baseViewport = page.getViewport({ scale: 1 });
     const toolbarHeight = 58;
+    const viewportWidth = Math.max(viewportNode.clientWidth, 320);
+    const viewportHeight = Math.max(window.innerHeight - toolbarHeight - 10, 280);
 
     if (currentMode === "horizontal") {
-      const targetHeight = Math.max(window.innerHeight - toolbarHeight - 10, 280);
-      return targetHeight / baseViewport.height;
+      return viewportHeight / baseViewport.height;
     }
 
-    const targetWidth = Math.min(Math.max(root.clientWidth, 320), 1180);
+    if (currentMode === "spread") {
+      const gap = 16;
+      const targetWidth = Math.min(Math.max((viewportWidth - gap) / 2, 180), 640);
+      return targetWidth / baseViewport.width;
+    }
+
+    const targetWidth = Math.min(viewportWidth, 1180);
     return targetWidth / baseViewport.width;
   }
 
-  async function renderPage(pdf, pageNumber, version) {
+  function appendSheet(wrapper, pageNumber, spreadState) {
+    if (currentMode !== "spread") {
+      pagesNode.appendChild(wrapper);
+      return;
+    }
+
+    if (pageNumber === 1) {
+      const coverRow = document.createElement("div");
+      coverRow.className = "reader-spread-row is-cover";
+      coverRow.appendChild(wrapper);
+      pagesNode.appendChild(coverRow);
+      return;
+    }
+
+    if ((pageNumber - 2) % 2 === 0 || !spreadState.currentRow) {
+      spreadState.currentRow = document.createElement("div");
+      spreadState.currentRow.className = "reader-spread-row";
+      pagesNode.appendChild(spreadState.currentRow);
+    }
+
+    spreadState.currentRow.appendChild(wrapper);
+  }
+
+  async function renderPage(pdf, pageNumber, version, spreadState) {
     if (version !== renderVersion) {
       return;
     }
@@ -131,7 +177,7 @@
     context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
 
     wrapper.appendChild(canvas);
-    pagesNode.appendChild(wrapper);
+    appendSheet(wrapper, pageNumber, spreadState);
 
     await page.render({
       canvasContext: context,
@@ -143,9 +189,10 @@
     const version = ++renderVersion;
     pagesNode.innerHTML = "";
     setStatus(`Chargement des pages... 0 / ${pdf.numPages}`);
+    const spreadState = { currentRow: null };
 
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      await renderPage(pdf, pageNumber, version);
+      await renderPage(pdf, pageNumber, version, spreadState);
 
       if (version !== renderVersion) {
         return;
@@ -316,15 +363,61 @@
   viewportNode.addEventListener(
     "wheel",
     (event) => {
-      if (!pdfDocument || !event.ctrlKey) {
+      if (!pdfDocument) {
+        return;
+      }
+
+      if (event.ctrlKey) {
+        event.preventDefault();
+        void changeZoom(zoom * (event.deltaY < 0 ? 1.08 : 1 / 1.08));
         return;
       }
 
       event.preventDefault();
-      void changeZoom(zoom * (event.deltaY < 0 ? 1.08 : 1 / 1.08));
+
+      if (currentMode === "horizontal") {
+        moveBy(-event.deltaY - event.deltaX, 0);
+        return;
+      }
+
+      moveBy(0, -event.deltaY);
     },
     { passive: false },
   );
+
+  window.addEventListener("keydown", (event) => {
+    if (!pdfDocument) {
+      return;
+    }
+
+    const target = event.target;
+    if (target && /input|textarea|select/i.test(target.tagName || "")) {
+      return;
+    }
+
+    const step = event.shiftKey ? 180 : 72;
+
+    switch (event.key) {
+      case "ArrowUp":
+        event.preventDefault();
+        moveBy(0, step);
+        break;
+      case "ArrowDown":
+        event.preventDefault();
+        moveBy(0, -step);
+        break;
+      case "ArrowLeft":
+        event.preventDefault();
+        moveBy(step, 0);
+        break;
+      case "ArrowRight":
+        event.preventDefault();
+        moveBy(-step, 0);
+        break;
+      default:
+        break;
+    }
+  });
 
   let resizeTimer = null;
   window.addEventListener("resize", () => {

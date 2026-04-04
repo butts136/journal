@@ -1568,6 +1568,7 @@ function renderReaderPage(journal) {
           <button type="button" class="mode-button" id="fullscreen-toggle-button">Plein ecran</button>
           <button type="button" class="mode-button is-active" data-mode="vertical">Vertical</button>
           <button type="button" class="mode-button" data-mode="horizontal">Horizontal</button>
+          <button type="button" class="mode-button" data-mode="spread">2 pages</button>
           <a class="button-secondary compact-button" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noreferrer">PDF</a>
         </div>
       </header>
@@ -1580,7 +1581,7 @@ function renderReaderPage(journal) {
       </main>
     </div>
     <script src="${PDFJS_URL}"></script>
-    <script src="/static/reader.js?v=4"></script>
+    <script src="/static/reader.js?v=5"></script>
   </body>
 </html>`;
 }
