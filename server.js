@@ -1563,6 +1563,7 @@ function renderReaderPage(journal) {
           <button type="button" class="mode-button" id="zoom-out-button">Zoom -</button>
           <button type="button" class="mode-button" id="zoom-reset-button">100%</button>
           <button type="button" class="mode-button" id="zoom-in-button">Zoom +</button>
+          <button type="button" class="mode-button" id="fullscreen-toggle-button">Plein ecran</button>
           <button type="button" class="mode-button is-active" data-mode="vertical">Vertical</button>
           <button type="button" class="mode-button" data-mode="horizontal">Horizontal</button>
           <a class="button-secondary compact-button" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noreferrer">PDF</a>
@@ -1577,7 +1578,7 @@ function renderReaderPage(journal) {
       </main>
     </div>
     <script src="${PDFJS_URL}"></script>
-    <script src="/static/reader.js?v=3"></script>
+    <script src="/static/reader.js?v=4"></script>
   </body>
 </html>`;
 }

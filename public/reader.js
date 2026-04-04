@@ -6,6 +6,7 @@
   const zoomOutButton = document.getElementById("zoom-out-button");
   const zoomResetButton = document.getElementById("zoom-reset-button");
   const zoomInButton = document.getElementById("zoom-in-button");
+  const fullscreenToggleButton = document.getElementById("fullscreen-toggle-button");
 
   if (!root || !statusNode || !viewportNode || !panStageNode) {
     return;
@@ -45,20 +46,18 @@
     const viewportWidth = viewportNode.clientWidth;
     const viewportHeight = viewportNode.clientHeight;
     const content = getContentSize();
-    const scaledWidth = content.width * zoom;
-    const scaledHeight = content.height * zoom;
 
-    let minX = viewportWidth - scaledWidth;
+    let minX = viewportWidth - content.width;
     let maxX = 0;
-    let minY = viewportHeight - scaledHeight;
+    let minY = viewportHeight - content.height;
     let maxY = 0;
 
-    if (scaledWidth <= viewportWidth) {
-      minX = maxX = (viewportWidth - scaledWidth) / 2;
+    if (content.width <= viewportWidth) {
+      minX = maxX = (viewportWidth - content.width) / 2;
     }
 
-    if (scaledHeight <= viewportHeight) {
-      minY = maxY = (viewportHeight - scaledHeight) / 2;
+    if (content.height <= viewportHeight) {
+      minY = maxY = (viewportHeight - content.height) / 2;
     }
 
     return {
@@ -67,41 +66,12 @@
     };
   }
 
-  function applyPanZoom() {
+  function applyPan() {
     const clamped = clampOffsets(offsetX, offsetY);
     offsetX = clamped.x;
     offsetY = clamped.y;
-    panStageNode.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${zoom})`;
+    panStageNode.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
     updateStatus();
-  }
-
-  function centerForCurrentZoom() {
-    const clamped = clampOffsets(offsetX, offsetY);
-    offsetX = clamped.x;
-    offsetY = clamped.y;
-    applyPanZoom();
-  }
-
-  function setZoom(nextZoom) {
-    const boundedZoom = Math.min(4, Math.max(0.5, nextZoom));
-    const previousZoom = zoom;
-
-    if (Math.abs(boundedZoom - previousZoom) < 0.001) {
-      return;
-    }
-
-    const viewportWidth = viewportNode.clientWidth;
-    const viewportHeight = viewportNode.clientHeight;
-    const anchorX = viewportWidth / 2;
-    const anchorY = viewportHeight / 2;
-
-    const logicalX = (anchorX - offsetX) / previousZoom;
-    const logicalY = (anchorY - offsetY) / previousZoom;
-
-    zoom = boundedZoom;
-    offsetX = anchorX - logicalX * zoom;
-    offsetY = anchorY - logicalY * zoom;
-    applyPanZoom();
   }
 
   function setMode(mode) {
@@ -114,11 +84,11 @@
     });
 
     if (pdfDocument) {
-      renderDocument(pdfDocument);
+      rerenderForViewport(false);
     }
   }
 
-  function getRenderScale(page) {
+  function getFitScale(page) {
     const baseViewport = page.getViewport({ scale: 1 });
     const toolbarHeight = 58;
 
@@ -142,7 +112,8 @@
       return;
     }
 
-    const viewport = page.getViewport({ scale: getRenderScale(page) });
+    const viewport = page.getViewport({ scale: getFitScale(page) * zoom });
+    const outputScale = window.devicePixelRatio || 1;
     const wrapper = document.createElement("div");
     wrapper.className = "reader-sheet";
 
@@ -153,8 +124,11 @@
       throw new Error("Canvas 2D indisponible.");
     }
 
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
+    canvas.width = Math.floor(viewport.width * outputScale);
+    canvas.height = Math.floor(viewport.height * outputScale);
+    canvas.style.width = `${Math.floor(viewport.width)}px`;
+    canvas.style.height = `${Math.floor(viewport.height)}px`;
+    context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
 
     wrapper.appendChild(canvas);
     pagesNode.appendChild(wrapper);
@@ -184,9 +158,7 @@
       }
     }
 
-    offsetX = 0;
-    offsetY = 0;
-    applyPanZoom();
+    applyPan();
   }
 
   function showFallback(message) {
@@ -204,22 +176,101 @@
     pagesNode.appendChild(fallback);
   }
 
+  async function rerenderForViewport(keepCenter) {
+    if (!pdfDocument) {
+      return;
+    }
+
+    let nextOffsetX = offsetX;
+    let nextOffsetY = offsetY;
+
+    if (keepCenter) {
+      const viewportWidth = viewportNode.clientWidth;
+      const viewportHeight = viewportNode.clientHeight;
+      const anchorX = viewportWidth / 2;
+      const anchorY = viewportHeight / 2;
+      const logicalX = anchorX - offsetX;
+      const logicalY = anchorY - offsetY;
+      const previousZoom = rerenderForViewport.previousZoom || zoom;
+      const ratio = zoom / previousZoom;
+
+      nextOffsetX = anchorX - logicalX * ratio;
+      nextOffsetY = anchorY - logicalY * ratio;
+    }
+
+    await renderDocument(pdfDocument);
+    offsetX = nextOffsetX;
+    offsetY = nextOffsetY;
+    applyPan();
+  }
+
+  rerenderForViewport.previousZoom = zoom;
+
   modeButtons.forEach((button) => {
     button.addEventListener("click", () => {
       setMode(button.dataset.mode);
     });
   });
 
+  function updateFullscreenButton() {
+    if (!fullscreenToggleButton) {
+      return;
+    }
+
+    fullscreenToggleButton.textContent = document.fullscreenElement ? "Quitter plein ecran" : "Plein ecran";
+  }
+
+  if (fullscreenToggleButton) {
+    fullscreenToggleButton.addEventListener("click", async () => {
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch {
+        setStatus("Plein ecran indisponible");
+      }
+    });
+
+    document.addEventListener("fullscreenchange", updateFullscreenButton);
+    updateFullscreenButton();
+  }
+
+  async function changeZoom(nextZoom) {
+    const boundedZoom = Math.min(4, Math.max(0.5, nextZoom));
+    const previousZoom = zoom;
+
+    if (Math.abs(boundedZoom - previousZoom) < 0.001) {
+      return;
+    }
+
+    zoom = boundedZoom;
+    rerenderForViewport.previousZoom = previousZoom;
+
+    try {
+      await rerenderForViewport(true);
+    } catch (error) {
+      showFallback(error instanceof Error ? error.message : "Impossible de recalculer le zoom.");
+    }
+  }
+
   if (zoomInButton) {
-    zoomInButton.addEventListener("click", () => setZoom(zoom * 1.2));
+    zoomInButton.addEventListener("click", () => {
+      void changeZoom(zoom * 1.2);
+    });
   }
 
   if (zoomOutButton) {
-    zoomOutButton.addEventListener("click", () => setZoom(zoom / 1.2));
+    zoomOutButton.addEventListener("click", () => {
+      void changeZoom(zoom / 1.2);
+    });
   }
 
   if (zoomResetButton) {
-    zoomResetButton.addEventListener("click", () => setZoom(1));
+    zoomResetButton.addEventListener("click", () => {
+      void changeZoom(1);
+    });
   }
 
   viewportNode.addEventListener("pointerdown", (event) => {
@@ -246,7 +297,7 @@
 
     offsetX = dragState.originX + (event.clientX - dragState.startX);
     offsetY = dragState.originY + (event.clientY - dragState.startY);
-    applyPanZoom();
+    applyPan();
   });
 
   function stopDrag(event) {
@@ -270,7 +321,7 @@
       }
 
       event.preventDefault();
-      setZoom(zoom * (event.deltaY < 0 ? 1.08 : 1 / 1.08));
+      void changeZoom(zoom * (event.deltaY < 0 ? 1.08 : 1 / 1.08));
     },
     { passive: false },
   );
@@ -283,10 +334,11 @@
 
     window.clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(() => {
-      renderDocument(pdfDocument).catch((error) => {
+      rerenderForViewport.previousZoom = zoom;
+      rerenderForViewport(true).catch((error) => {
         showFallback(error instanceof Error ? error.message : "Impossible de recharger le PDF.");
       });
-    }, 120);
+    }, 140);
   });
 
   async function boot() {
