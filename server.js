@@ -247,6 +247,7 @@ function initializeDatabase(db) {
       admin_password_hash TEXT,
       session_secret TEXT NOT NULL,
       poll_interval_seconds INTEGER NOT NULL DEFAULT 180,
+      max_journal_age_days INTEGER,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -306,6 +307,13 @@ function initializeDatabase(db) {
       "INSERT INTO app_config (id, session_secret) VALUES (1, ?)",
     ).run(crypto.randomBytes(32).toString("base64url"));
   }
+
+  const appConfigColumns = db.prepare("PRAGMA table_info(app_config)").all();
+  const hasMaxJournalAge = appConfigColumns.some((column) => column.name === "max_journal_age_days");
+
+  if (!hasMaxJournalAge) {
+    db.exec("ALTER TABLE app_config ADD COLUMN max_journal_age_days INTEGER");
+  }
 }
 
 function getDb() {
@@ -321,7 +329,7 @@ function getDb() {
 function getAppConfig() {
   const row = getDb()
     .prepare(
-      "SELECT admin_password_hash, session_secret, poll_interval_seconds FROM app_config WHERE id = 1",
+      "SELECT admin_password_hash, session_secret, poll_interval_seconds, max_journal_age_days FROM app_config WHERE id = 1",
     )
     .get();
 
@@ -329,6 +337,10 @@ function getAppConfig() {
     adminPasswordHash: row.admin_password_hash,
     sessionSecret: row.session_secret,
     pollIntervalSeconds: row.poll_interval_seconds || DEFAULT_POLL_INTERVAL_SECONDS,
+    maxJournalAgeDays:
+      typeof row.max_journal_age_days === "number" && row.max_journal_age_days > 0
+        ? row.max_journal_age_days
+        : null,
   };
 }
 
@@ -343,6 +355,17 @@ function setAdminPassword(password) {
       "UPDATE app_config SET admin_password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
     )
     .run(passwordHash);
+}
+
+function setMaxJournalAgeDays(value) {
+  const parsed = Number(value);
+  const maxJournalAgeDays = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+
+  getDb()
+    .prepare(
+      "UPDATE app_config SET max_journal_age_days = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+    )
+    .run(maxJournalAgeDays);
 }
 
 function getEnabledFeeds() {
@@ -592,6 +615,18 @@ function formatBytes(value) {
   }
 
   return `${current.toFixed(current >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function isJournalTooOld(publicationDate, maxJournalAgeDays) {
+  if (!maxJournalAgeDays || !(publicationDate instanceof Date)) {
+    return false;
+  }
+
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12, 0, 0);
+  const ageLimitUtc = todayUtc - (maxJournalAgeDays - 1) * 24 * 60 * 60 * 1000;
+
+  return publicationDate.getTime() < ageLimitUtc;
 }
 
 function buildJournalStoragePaths(publicationKey, dateKey) {
@@ -956,6 +991,12 @@ function broadcastEvent(type, payload) {
 async function processFeedItem(feedId, item) {
   const parsed = parseJournalCandidate(item, getEnabledSearchTerms());
   if (!parsed) {
+    return;
+  }
+
+  const { maxJournalAgeDays } = getAppConfig();
+
+  if (isJournalTooOld(parsed.publicationDate, maxJournalAgeDays)) {
     return;
   }
 
@@ -1407,6 +1448,7 @@ function renderSettingsPage(request, searchParams) {
   const snapshot = getStatusSnapshot();
   const terms = getAllSearchTerms();
   const feeds = getAllFeeds();
+  const config = getAppConfig();
 
   return renderShell({
     title: "Parametres",
@@ -1473,6 +1515,16 @@ function renderSettingsPage(request, searchParams) {
         </section>
       </div>
       <section class="panel">
+        <h2>Limite de fraicheur</h2>
+        <p>Bloque l'ingestion des journaux plus vieux que X jours par rapport a aujourd'hui. Laisse vide pour ne fixer aucune limite.</p>
+        <form method="post" action="/settings/retention" class="inline-form">
+          <input type="number" min="1" step="1" name="maxJournalAgeDays" value="${escapeHtml(
+            config.maxJournalAgeDays ? String(config.maxJournalAgeDays) : "",
+          )}" placeholder="30" />
+          <button type="submit">Enregistrer</button>
+        </form>
+      </section>
+      <section class="panel">
         <h2>Actions</h2>
         <div class="action-row">
           <form method="post" action="/settings/scan">
@@ -1490,28 +1542,37 @@ function renderSettingsPage(request, searchParams) {
 function renderReaderPage(journal) {
   const pdfUrl = toManagedFileUrl(journal.pdf_relative_path);
 
-  return renderShell({
-    title: journal.display_title,
-    scripts: [PDFJS_URL, "/static/reader.js"],
-    body: `
-      <section class="reader-header">
-        <div>
-          <a class="back-link" href="/">Retour a l'accueil</a>
-          <h1>${escapeHtml(journal.display_title)}</h1>
-          <p>${escapeHtml(journal.source_title)}</p>
+  return `<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(journal.display_title)} | ${APP_NAME}</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="reader-body">
+    <div class="reader-screen">
+      <header class="reader-toolbar">
+        <div class="reader-toolbar-main">
+          <a class="back-link" href="/">Accueil</a>
+          <strong class="reader-title">${escapeHtml(journal.display_title)}</strong>
+          <span class="reader-meta">${escapeHtml(journal.source_title)}</span>
         </div>
-        <div class="reader-actions">
+        <div class="reader-toolbar-actions">
+          <span class="reader-status" id="reader-status">Chargement...</span>
           <button type="button" class="mode-button is-active" data-mode="vertical">Vertical</button>
           <button type="button" class="mode-button" data-mode="horizontal">Horizontal</button>
-          <a class="button-secondary" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noreferrer">Ouvrir le PDF</a>
+          <a class="button-secondary compact-button" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noreferrer">PDF</a>
         </div>
-      </section>
-      <section id="reader-root" class="reader-root" data-pdf-url="${escapeHtml(pdfUrl)}">
-        <div class="reader-status">Chargement du journal...</div>
+      </header>
+      <main id="reader-root" class="reader-stage" data-pdf-url="${escapeHtml(pdfUrl)}">
         <div class="reader-pages mode-vertical"></div>
-      </section>
-    `,
-  });
+      </main>
+    </div>
+    <script src="${PDFJS_URL}"></script>
+    <script src="/static/reader.js"></script>
+  </body>
+</html>`;
 }
 
 function contentTypeFor(filePath) {
@@ -1760,6 +1821,13 @@ async function handlePost(request, response, url) {
   if (url.pathname === "/settings/scan") {
     triggerScanNow().catch(() => {});
     redirect(response, "/settings?type=success&message=Scan%20declenche");
+    return;
+  }
+
+  if (url.pathname === "/settings/retention") {
+    const form = await readForm(request);
+    setMaxJournalAgeDays(form.maxJournalAgeDays);
+    redirect(response, "/settings?type=success&message=Limite%20de%20fraicheur%20mise%20a%20jour");
     return;
   }
 

@@ -6,8 +6,8 @@
   --text: #261a10;
   --muted: #6e5a47;
   --brand: #ab3a24;
-  --brand-soft: #f0c3a4;
   --shadow: 0 24px 60px rgba(79, 47, 24, 0.12);
+  --toolbar-height: 58px;
 }
 
 * {
@@ -23,6 +23,11 @@ body {
   background:
     radial-gradient(circle at top left, rgba(255, 225, 186, 0.7), transparent 30%),
     linear-gradient(180deg, #efe4d3 0%, var(--bg) 34%, #f8f4ed 100%);
+}
+
+body.reader-body {
+  overflow: hidden;
+  background: #f2ebdf;
 }
 
 a {
@@ -50,10 +55,14 @@ button,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.72);
   color: var(--text);
   border: 1px solid var(--line);
   box-shadow: none;
+}
+
+.compact-button {
+  padding: 0.6rem 0.95rem;
 }
 
 input {
@@ -139,8 +148,7 @@ h3 {
 }
 
 .hero,
-.panel,
-.reader-header {
+.panel {
   border: 1px solid rgba(255, 255, 255, 0.7);
   border-radius: 34px;
   background: var(--panel);
@@ -169,7 +177,6 @@ h3 {
 
 .hero p,
 .panel p,
-.reader-header p,
 .muted {
   color: var(--muted);
 }
@@ -197,17 +204,17 @@ h3 {
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.76);
   border: 1px solid var(--line);
+  min-width: 0;
 }
 
 .hero-stats strong {
   display: block;
-  font-size: 1.8rem;
+  font-size: 1.55rem;
   margin-bottom: 0.25rem;
 }
 
 .section-head,
-.action-row,
-.reader-actions {
+.action-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -227,17 +234,18 @@ h3 {
 
 .journal-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(184px, 184px));
+  justify-content: start;
   gap: 1rem;
 }
 
 .journal-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  padding: 0.95rem;
+  display: grid;
+  gap: 0.65rem;
+  width: 184px;
+  padding: 0.75rem;
   border: 1px solid rgba(255, 255, 255, 0.8);
-  border-radius: 28px;
+  border-radius: 22px;
   background: rgba(255, 255, 255, 0.72);
   box-shadow: 0 18px 34px rgba(69, 40, 20, 0.08);
   transition: transform 0.18s ease, box-shadow 0.18s ease;
@@ -250,11 +258,11 @@ h3 {
 
 .journal-thumb {
   position: relative;
-  aspect-ratio: 3 / 4.2;
+  width: 100%;
+  aspect-ratio: 3 / 4.15;
   overflow: hidden;
-  border-radius: 20px;
+  border-radius: 16px;
   background: linear-gradient(180deg, #fff, #eee4d5);
-  border: 1px solid rgba(84, 49, 24, 0.1);
 }
 
 .journal-thumb canvas,
@@ -270,19 +278,24 @@ h3 {
   inset: 0;
   display: grid;
   place-items: center;
-  font-size: 1.1rem;
+  font-size: 0.9rem;
   color: var(--muted);
   letter-spacing: 0.08em;
 }
 
 .journal-copy {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.3rem;
+}
+
+.journal-copy strong {
+  font-size: 0.95rem;
+  line-height: 1.25;
 }
 
 .journal-copy span {
   color: var(--muted);
-  font-size: 0.95rem;
+  font-size: 0.84rem;
 }
 
 .archive-year,
@@ -331,8 +344,7 @@ h3 {
 }
 
 .flash,
-.empty-state,
-.reader-status {
+.empty-state {
   padding: 1rem 1.15rem;
   border-radius: 22px;
   margin-bottom: 1rem;
@@ -353,72 +365,104 @@ h3 {
   border: 1px dashed var(--line);
 }
 
-.reader-header {
+.back-link {
+  color: var(--brand);
+  white-space: nowrap;
+}
+
+.reader-screen {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: var(--toolbar-height) minmax(0, 1fr);
+}
+
+.reader-toolbar {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 1.2rem;
-  padding: 1.3rem 1.5rem;
-  margin-bottom: 1rem;
+  gap: 1rem;
+  min-height: var(--toolbar-height);
+  padding: 0.55rem 1rem;
+  background: rgba(255, 250, 242, 0.9);
+  border-bottom: 1px solid rgba(73, 51, 32, 0.12);
+  backdrop-filter: blur(14px);
 }
 
-.reader-header h1 {
-  margin: 0.45rem 0 0.2rem;
-  font-size: clamp(1.5rem, 4vw, 2.5rem);
+.reader-toolbar-main,
+.reader-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-width: 0;
 }
 
-.reader-root {
-  padding: 1rem;
-  border-radius: 34px;
-  background: rgba(240, 232, 220, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  box-shadow: var(--shadow);
+.reader-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.98rem;
+}
+
+.reader-meta,
+#reader-status {
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.reader-stage {
+  min-height: 0;
+  overflow: auto;
+  background: #f1ebdf;
 }
 
 .reader-pages {
-  display: grid;
-  gap: 1rem;
+  min-height: 100%;
+}
+
+.reader-pages.mode-vertical {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .reader-pages.mode-horizontal {
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(300px, 45vw);
-  overflow-x: auto;
-  align-items: start;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  width: max-content;
+  min-width: 100%;
 }
 
-.reader-page {
-  padding: 0.7rem;
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.8);
+.reader-sheet {
+  flex: 0 0 auto;
+  line-height: 0;
+}
+
+.reader-sheet canvas {
+  display: block;
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.mode-button {
+  padding: 0.55rem 0.9rem;
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
   border: 1px solid var(--line);
-}
-
-.reader-page canvas {
-  width: 100%;
-  height: auto;
-  display: block;
-  border-radius: 14px;
-}
-
-.page-index {
-  display: block;
-  margin-top: 0.6rem;
-  color: var(--muted);
-  text-align: center;
 }
 
 .mode-button.is-active {
   background: linear-gradient(135deg, #bb4d2f, #7e2418);
   color: #fff;
-}
-
-.back-link {
-  color: var(--brand);
+  border-color: transparent;
 }
 
 @media (max-width: 900px) {
   .hero,
-  .reader-header,
   .settings-grid {
     grid-template-columns: 1fr;
     display: grid;
@@ -426,13 +470,34 @@ h3 {
 
   .topbar,
   .section-head,
-  .action-row,
-  .reader-actions {
+  .action-row {
     align-items: stretch;
     flex-direction: column;
   }
 
   .inline-form {
     grid-template-columns: 1fr;
+  }
+
+  .journal-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 160px));
+  }
+
+  .journal-card {
+    width: 160px;
+  }
+
+  .reader-screen {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .reader-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .reader-toolbar-main,
+  .reader-toolbar-actions {
+    flex-wrap: wrap;
   }
 }
