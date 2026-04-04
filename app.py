@@ -1624,9 +1624,13 @@ class AppServer(ThreadingHTTPServer):
 def main() -> int:
     ensure_bootstrap()
     server = AppServer(("0.0.0.0", PORT), AppHandler)
+    stop_once = threading.Event()
 
     def shutdown_handler(signum: int, frame: object) -> None:
-        server.shutdown()
+        if stop_once.is_set():
+            return
+        stop_once.set()
+        threading.Thread(target=server.shutdown, daemon=True).start()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
