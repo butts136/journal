@@ -1226,7 +1226,7 @@ function getFlash(searchParams) {
   return `<div class="flash flash-${escapeHtml(type)}">${escapeHtml(text)}</div>`;
 }
 
-function renderShell({ title, body, currentPath = "/", scripts = [] }) {
+function renderShell({ title, body, currentPath = "/", scripts = [], bodyClass = "" }) {
   const configured = isConfigured();
   const settingsHref = configured ? "/settings" : "/setup";
 
@@ -1238,7 +1238,7 @@ function renderShell({ title, body, currentPath = "/", scripts = [] }) {
     <title>${escapeHtml(title)} | ${APP_NAME}</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body class="${escapeHtml(bodyClass)}">
     <div class="page-shell">
       <header class="topbar">
         <a class="brand" href="/">
@@ -1303,6 +1303,7 @@ function renderHomePage(searchParams) {
   return renderShell({
     title: "Accueil",
     currentPath: "/",
+    bodyClass: "catalog-body",
     scripts: [PDFJS_URL, "/static/app.js"],
     body: `
       <section class="hero">
@@ -1377,6 +1378,7 @@ function renderArchivesPage(searchParams) {
   return renderShell({
     title: "Archives",
     currentPath: "/archives",
+    bodyClass: "catalog-body",
     scripts: [PDFJS_URL, "/static/app.js"],
     body: `
       <section class="hero hero-compact">

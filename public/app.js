@@ -1,4 +1,7 @@
 (function () {
+  const THUMB_CACHE_PREFIX = "journal-thumb:v1:";
+  const thumbMemoryCache = new Map();
+
   if (window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -6,12 +9,74 @@
 
   const cards = Array.from(document.querySelectorAll(".journal-card[data-pdf-url]"));
 
+  function getThumbCacheKey(pdfUrl) {
+    return `${THUMB_CACHE_PREFIX}${pdfUrl}`;
+  }
+
+  function readCachedThumb(pdfUrl) {
+    const key = getThumbCacheKey(pdfUrl);
+
+    if (thumbMemoryCache.has(key)) {
+      return thumbMemoryCache.get(key);
+    }
+
+    try {
+      const cached = window.localStorage.getItem(key);
+      if (cached) {
+        thumbMemoryCache.set(key, cached);
+        return cached;
+      }
+    } catch {}
+
+    return null;
+  }
+
+  function writeCachedThumb(pdfUrl, dataUrl) {
+    const key = getThumbCacheKey(pdfUrl);
+    thumbMemoryCache.set(key, dataUrl);
+
+    try {
+      window.localStorage.setItem(key, dataUrl);
+    } catch {}
+  }
+
+  function paintThumbImage(card, dataUrl) {
+    const canvas = card.querySelector("canvas");
+    const fallback = card.querySelector(".journal-thumb-fallback");
+    const existingImage = card.querySelector("img");
+
+    if (existingImage) {
+      existingImage.src = dataUrl;
+    } else {
+      const image = document.createElement("img");
+      image.alt = "";
+      image.loading = "lazy";
+      image.decoding = "async";
+      image.src = dataUrl;
+      if (canvas) {
+        canvas.replaceWith(image);
+      }
+    }
+
+    if (fallback) {
+      fallback.style.display = "none";
+    }
+
+    card.dataset.thumbReady = "1";
+  }
+
   async function renderCard(card) {
     const pdfUrl = card.dataset.pdfUrl;
     const canvas = card.querySelector("canvas");
     const fallback = card.querySelector(".journal-thumb-fallback");
 
     if (!pdfUrl || !canvas || !window.pdfjsLib) {
+      return;
+    }
+
+    const cachedThumb = readCachedThumb(pdfUrl);
+    if (cachedThumb) {
+      paintThumbImage(card, cachedThumb);
       return;
     }
 
@@ -31,9 +96,9 @@
         viewport: scaledViewport,
       }).promise;
 
-      if (fallback) {
-        fallback.style.display = "none";
-      }
+      const dataUrl = canvas.toDataURL("image/webp", 0.82);
+      writeCachedThumb(pdfUrl, dataUrl);
+      paintThumbImage(card, dataUrl);
     } catch {
       if (fallback) {
         fallback.textContent = "Miniature indisponible";
