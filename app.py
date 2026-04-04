@@ -974,7 +974,7 @@ def read_cookies(handler: BaseHTTPRequestHandler) -> dict:
 
 
 def get_base_path(handler: BaseHTTPRequestHandler) -> str:
-    return normalize_base_path(handler.headers.get("X-Forwarded-Prefix") or DEFAULT_BASE_PATH)
+    return normalize_base_path(handler.headers.get("X-Forwarded-Prefix") or "")
 
 
 def is_admin_authenticated(handler: BaseHTTPRequestHandler) -> bool:
@@ -1226,7 +1226,12 @@ def content_type_for(file_path: Path) -> str:
 
 def parse_query(path_value: str) -> tuple[str, dict]:
     parsed = urllib.parse.urlsplit(path_value)
-    return parsed.path or "/", urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    path_name = parsed.path or "/"
+    if DEFAULT_BASE_PATH and (path_name == DEFAULT_BASE_PATH or path_name.startswith(f"{DEFAULT_BASE_PATH}/")):
+        stripped = path_name[len(DEFAULT_BASE_PATH):]
+        path_name = stripped if stripped.startswith("/") else f"/{stripped}"
+        path_name = path_name or "/"
+    return path_name, urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
 
 
 class AppHandler(BaseHTTPRequestHandler):
