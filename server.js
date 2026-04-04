@@ -1625,7 +1625,7 @@ function renderReaderPage(journal) {
       </main>
     </div>
     <script src="${PDFJS_URL}"></script>
-    <script src="/static/reader.js?v=8"></script>
+    <script src="/static/reader.js?v=9"></script>
   </body>
 </html>`;
 }
