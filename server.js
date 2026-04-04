@@ -1598,20 +1598,33 @@ function renderReaderPage(journal) {
     <div class="reader-screen">
       <header class="reader-toolbar">
         <div class="reader-toolbar-main">
-          <a class="back-link" href="/">Accueil</a>
+          <a class="reader-nav-button back-link" href="/">Retour</a>
           <strong class="reader-title">${escapeHtml(journal.display_title)}</strong>
-          <span class="reader-meta">${escapeHtml(journal.source_title)}</span>
         </div>
         <div class="reader-toolbar-actions">
           <span class="reader-status" id="reader-status">Chargement...</span>
-          <button type="button" class="mode-button" id="zoom-out-button">Zoom -</button>
-          <button type="button" class="mode-button" id="zoom-reset-button">100%</button>
-          <button type="button" class="mode-button" id="zoom-in-button">Zoom +</button>
-          <button type="button" class="mode-button" id="fullscreen-toggle-button">Plein ecran</button>
-          <button type="button" class="mode-button is-active" data-mode="vertical">Vertical</button>
-          <button type="button" class="mode-button" data-mode="horizontal">Horizontal</button>
-          <button type="button" class="mode-button" data-mode="spread">2 pages</button>
-          <a class="button-secondary compact-button" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noreferrer">PDF</a>
+          <button type="button" class="reader-control-button" id="mode-cycle-button">2 pages</button>
+          <div class="reader-zoom-control" id="zoom-control">
+            <button type="button" class="reader-icon-button" id="zoom-toggle-button" aria-label="Zoom" title="Zoom">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M10.5 4a6.5 6.5 0 1 0 4.06 11.58l4.43 4.43 1.41-1.41-4.43-4.43A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm-.75 1.75v2h-2v1.5h2v2h1.5v-2h2v-1.5h-2v-2h-1.5Z" fill="currentColor"/>
+              </svg>
+            </button>
+            <div class="reader-zoom-panel" id="zoom-panel" hidden>
+              <input id="zoom-range" class="reader-zoom-range" type="range" min="100" max="250" step="5" value="100" />
+              <span id="zoom-value" class="reader-zoom-value">100%</span>
+            </div>
+          </div>
+          <button type="button" class="reader-icon-button" id="fullscreen-toggle-button" aria-label="Plein ecran" title="Plein ecran">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 9V4h5v2H6v3H4Zm10-5h6v6h-2V6h-4V4ZM4 15h2v3h3v2H4v-5Zm14 3v-3h2v5h-5v-2h3Z" fill="currentColor"/>
+            </svg>
+          </button>
+          <a class="reader-icon-button" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noreferrer" aria-label="Telecharger" title="Telecharger">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M11 4h2v8.17l2.59-2.58L17 11l-5 5-5-5 1.41-1.41L11 12.17V4Zm-5 14h12v2H6v-2Z" fill="currentColor"/>
+            </svg>
+          </a>
         </div>
       </header>
       <main id="reader-root" class="reader-stage" data-pdf-url="${escapeHtml(pdfUrl)}">

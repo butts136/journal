@@ -3,9 +3,12 @@
   const statusNode = document.getElementById("reader-status");
   const viewportNode = document.getElementById("reader-viewport");
   const panStageNode = document.getElementById("reader-pan-stage");
-  const zoomOutButton = document.getElementById("zoom-out-button");
-  const zoomResetButton = document.getElementById("zoom-reset-button");
-  const zoomInButton = document.getElementById("zoom-in-button");
+  const modeCycleButton = document.getElementById("mode-cycle-button");
+  const zoomControl = document.getElementById("zoom-control");
+  const zoomToggleButton = document.getElementById("zoom-toggle-button");
+  const zoomPanel = document.getElementById("zoom-panel");
+  const zoomRange = document.getElementById("zoom-range");
+  const zoomValue = document.getElementById("zoom-value");
   const fullscreenToggleButton = document.getElementById("fullscreen-toggle-button");
 
   if (!root || !statusNode || !viewportNode || !panStageNode) {
@@ -14,14 +17,24 @@
 
   const pdfUrl = root.dataset.pdfUrl;
   const pagesNode = root.querySelector(".reader-pages");
-  const modeButtons = Array.from(document.querySelectorAll(".mode-button[data-mode]"));
-  let currentMode = "vertical";
+  const modes = [
+    { key: "spread", label: "2 pages" },
+    { key: "vertical", label: "Vertical" },
+    { key: "horizontal", label: "Horizontal" },
+  ];
+  const MIN_ZOOM = 1;
+  const MAX_ZOOM = 2.5;
+  const QUALITY_SCALE = Math.max(window.devicePixelRatio || 1, 2);
+
+  let currentMode = "spread";
   let pdfDocument = null;
   let renderVersion = 0;
   let zoom = 1;
   let offsetX = 0;
   let offsetY = 0;
   let dragState = null;
+  let hasCompletedInitialRender = false;
+  let resizeTimer = null;
 
   function setStatus(text) {
     statusNode.textContent = text;
@@ -35,6 +48,25 @@
     setStatus(`${pdfDocument.numPages} pages · ${Math.round(zoom * 100)}%`);
   }
 
+  function updateModeButton() {
+    if (!modeCycleButton) {
+      return;
+    }
+
+    const current = modes.find((mode) => mode.key === currentMode) || modes[0];
+    modeCycleButton.textContent = current.label;
+  }
+
+  function updateZoomUi() {
+    if (zoomRange) {
+      zoomRange.value = String(Math.round(zoom * 100));
+    }
+
+    if (zoomValue) {
+      zoomValue.textContent = `${Math.round(zoom * 100)}%`;
+    }
+  }
+
   function getContentSize() {
     return {
       width: pagesNode.offsetWidth,
@@ -46,18 +78,20 @@
     const viewportWidth = viewportNode.clientWidth;
     const viewportHeight = viewportNode.clientHeight;
     const content = getContentSize();
+    const scaledWidth = content.width * zoom;
+    const scaledHeight = content.height * zoom;
 
-    let minX = viewportWidth - content.width;
+    let minX = viewportWidth - scaledWidth;
     let maxX = 0;
-    let minY = viewportHeight - content.height;
+    let minY = viewportHeight - scaledHeight;
     let maxY = 0;
 
-    if (content.width <= viewportWidth) {
-      minX = maxX = (viewportWidth - content.width) / 2;
+    if (scaledWidth <= viewportWidth) {
+      minX = maxX = (viewportWidth - scaledWidth) / 2;
     }
 
-    if (content.height <= viewportHeight) {
-      minY = maxY = (viewportHeight - content.height) / 2;
+    if (scaledHeight <= viewportHeight) {
+      minY = maxY = (viewportHeight - scaledHeight) / 2;
     }
 
     return {
@@ -66,103 +100,103 @@
     };
   }
 
-  function applyPan() {
+  function applyPanZoom() {
     const clamped = clampOffsets(offsetX, offsetY);
     offsetX = clamped.x;
     offsetY = clamped.y;
-    panStageNode.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+    panStageNode.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${zoom})`;
+    updateZoomUi();
     updateStatus();
   }
 
   function moveBy(deltaX, deltaY) {
     offsetX += deltaX;
     offsetY += deltaY;
-    applyPan();
+    applyPanZoom();
   }
 
-  function setMode(mode) {
-    currentMode =
-      mode === "horizontal" || mode === "spread"
-        ? mode
-        : "vertical";
-
-    pagesNode.classList.remove("mode-vertical", "mode-horizontal", "mode-spread");
-    pagesNode.classList.add(
-      currentMode === "horizontal"
-        ? "mode-horizontal"
-        : currentMode === "spread"
-          ? "mode-spread"
-          : "mode-vertical",
-    );
-
-    modeButtons.forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.mode === currentMode);
-    });
-
-    if (pdfDocument) {
-      rerenderForViewport(false);
-    }
-  }
-
-  function getFitScale(page) {
+  function getBaseDisplayScale(page, pageNumber) {
     const baseViewport = page.getViewport({ scale: 1 });
-    const toolbarHeight = 58;
     const viewportWidth = Math.max(viewportNode.clientWidth, 320);
-    const viewportHeight = Math.max(window.innerHeight - toolbarHeight - 10, 280);
+    const viewportHeight = Math.max(viewportNode.clientHeight, 280);
 
     if (currentMode === "horizontal") {
       return viewportHeight / baseViewport.height;
     }
 
     if (currentMode === "spread") {
-      const gap = 16;
-      const targetWidth = Math.min(Math.max((viewportWidth - gap) / 2, 180), 640);
-      return targetWidth / baseViewport.width;
+      if (pageNumber === 1) {
+        return viewportWidth / baseViewport.width;
+      }
+
+      return (viewportWidth / 2) / baseViewport.width;
     }
 
-    const targetWidth = Math.min(viewportWidth, 1180);
-    return targetWidth / baseViewport.width;
+    return viewportWidth / baseViewport.width;
   }
 
-  function appendSheet(wrapper, pageNumber, spreadState) {
-    if (currentMode !== "spread") {
-      pagesNode.appendChild(wrapper);
-      return;
-    }
+  function createSheet(pageNumber) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "reader-sheet";
+    wrapper.dataset.pageNumber = String(pageNumber);
+    return wrapper;
+  }
 
-    if (pageNumber === 1) {
+  function buildSpreadRows(sheets) {
+    const fragment = document.createDocumentFragment();
+
+    if (sheets[0]) {
       const coverRow = document.createElement("div");
       coverRow.className = "reader-spread-row is-cover";
-      coverRow.appendChild(wrapper);
-      pagesNode.appendChild(coverRow);
-      return;
+      coverRow.appendChild(sheets[0]);
+      fragment.appendChild(coverRow);
     }
 
-    if ((pageNumber - 2) % 2 === 0 || !spreadState.currentRow) {
-      spreadState.currentRow = document.createElement("div");
-      spreadState.currentRow.className = "reader-spread-row";
-      pagesNode.appendChild(spreadState.currentRow);
+    for (let index = 1; index < sheets.length; index += 2) {
+      const row = document.createElement("div");
+      row.className = "reader-spread-row";
+      row.appendChild(sheets[index]);
+
+      if (sheets[index + 1]) {
+        row.appendChild(sheets[index + 1]);
+      }
+
+      fragment.appendChild(row);
     }
 
-    spreadState.currentRow.appendChild(wrapper);
+    return fragment;
   }
 
-  async function renderPage(pdf, pageNumber, version, spreadState) {
-    if (version !== renderVersion) {
+  function applyLayout() {
+    const sheets = Array.from(pagesNode.querySelectorAll(".reader-sheet"));
+
+    pagesNode.textContent = "";
+
+    if (currentMode === "spread") {
+      pagesNode.appendChild(buildSpreadRows(sheets));
       return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    sheets.forEach((sheet) => fragment.appendChild(sheet));
+    pagesNode.appendChild(fragment);
+  }
+
+  async function renderPage(pdf, pageNumber, version) {
+    if (version !== renderVersion) {
+      return null;
     }
 
     const page = await pdf.getPage(pageNumber);
 
     if (version !== renderVersion) {
-      return;
+      return null;
     }
 
-    const viewport = page.getViewport({ scale: getFitScale(page) * zoom });
-    const outputScale = window.devicePixelRatio || 1;
-    const wrapper = document.createElement("div");
-    wrapper.className = "reader-sheet";
-
+    const displayScale = getBaseDisplayScale(page, pageNumber);
+    const displayViewport = page.getViewport({ scale: displayScale });
+    const renderViewport = page.getViewport({ scale: displayScale * QUALITY_SCALE });
+    const wrapper = createSheet(pageNumber);
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
 
@@ -170,32 +204,42 @@
       throw new Error("Canvas 2D indisponible.");
     }
 
-    canvas.width = Math.floor(viewport.width * outputScale);
-    canvas.height = Math.floor(viewport.height * outputScale);
-    canvas.style.width = `${Math.floor(viewport.width)}px`;
-    canvas.style.height = `${Math.floor(viewport.height)}px`;
-    context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+    canvas.width = Math.max(1, Math.ceil(renderViewport.width));
+    canvas.height = Math.max(1, Math.ceil(renderViewport.height));
+    canvas.style.width = `${Math.ceil(displayViewport.width)}px`;
+    canvas.style.height = `${Math.ceil(displayViewport.height)}px`;
 
     wrapper.appendChild(canvas);
-    appendSheet(wrapper, pageNumber, spreadState);
 
     await page.render({
       canvasContext: context,
-      viewport,
+      viewport: renderViewport,
     }).promise;
+
+    return wrapper;
   }
 
-  async function renderDocument(pdf) {
+  async function renderDocument(pdf, options = {}) {
+    const { recenter = !hasCompletedInitialRender, preserveOffsets = false } = options;
     const version = ++renderVersion;
-    pagesNode.innerHTML = "";
+    const savedOffsetX = offsetX;
+    const savedOffsetY = offsetY;
+
+    pagesNode.style.visibility = "hidden";
+    pagesNode.textContent = "";
     setStatus(`Chargement des pages... 0 / ${pdf.numPages}`);
-    const spreadState = { currentRow: null };
+
+    const sheets = [];
 
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      await renderPage(pdf, pageNumber, version, spreadState);
+      const sheet = await renderPage(pdf, pageNumber, version);
 
       if (version !== renderVersion) {
         return;
+      }
+
+      if (sheet) {
+        sheets.push(sheet);
       }
 
       setStatus(`Chargement des pages... ${pageNumber} / ${pdf.numPages}`);
@@ -205,12 +249,29 @@
       }
     }
 
-    applyPan();
+    const fragment = document.createDocumentFragment();
+    sheets.forEach((sheet) => fragment.appendChild(sheet));
+    pagesNode.textContent = "";
+    pagesNode.appendChild(fragment);
+    applyLayout();
+
+    if (recenter) {
+      offsetX = 0;
+      offsetY = 0;
+    } else if (preserveOffsets) {
+      offsetX = savedOffsetX;
+      offsetY = savedOffsetY;
+    }
+
+    pagesNode.style.visibility = "visible";
+    applyPanZoom();
+    hasCompletedInitialRender = true;
   }
 
   function showFallback(message) {
     setStatus(message);
-    pagesNode.innerHTML = "";
+    pagesNode.style.visibility = "visible";
+    pagesNode.textContent = "";
     panStageNode.style.transform = "";
 
     const fallback = document.createElement("div");
@@ -223,40 +284,82 @@
     pagesNode.appendChild(fallback);
   }
 
-  async function rerenderForViewport(keepCenter) {
-    if (!pdfDocument) {
+  function setMode(mode, options = {}) {
+    currentMode = modes.some((entry) => entry.key === mode) ? mode : "spread";
+    pagesNode.classList.remove("mode-vertical", "mode-horizontal", "mode-spread");
+    pagesNode.classList.add(
+      currentMode === "horizontal"
+        ? "mode-horizontal"
+        : currentMode === "vertical"
+          ? "mode-vertical"
+          : "mode-spread",
+    );
+    updateModeButton();
+
+    if (pdfDocument && options.rerender !== false) {
+      renderDocument(pdfDocument, {
+        recenter: true,
+        preserveOffsets: false,
+      }).catch((error) => {
+        showFallback(error instanceof Error ? error.message : "Impossible de changer le mode.");
+      });
+    }
+  }
+
+  function cycleMode() {
+    const currentIndex = modes.findIndex((mode) => mode.key === currentMode);
+    const nextMode = modes[(currentIndex + 1) % modes.length] || modes[0];
+    setMode(nextMode.key);
+  }
+
+  function toggleZoomPanel(forceOpen) {
+    if (!zoomPanel || !zoomToggleButton) {
       return;
     }
 
-    let nextOffsetX = offsetX;
-    let nextOffsetY = offsetY;
-
-    if (keepCenter) {
-      const viewportWidth = viewportNode.clientWidth;
-      const viewportHeight = viewportNode.clientHeight;
-      const anchorX = viewportWidth / 2;
-      const anchorY = viewportHeight / 2;
-      const logicalX = anchorX - offsetX;
-      const logicalY = anchorY - offsetY;
-      const previousZoom = rerenderForViewport.previousZoom || zoom;
-      const ratio = zoom / previousZoom;
-
-      nextOffsetX = anchorX - logicalX * ratio;
-      nextOffsetY = anchorY - logicalY * ratio;
-    }
-
-    await renderDocument(pdfDocument);
-    offsetX = nextOffsetX;
-    offsetY = nextOffsetY;
-    applyPan();
+    const nextOpen = typeof forceOpen === "boolean" ? forceOpen : zoomPanel.hidden;
+    zoomPanel.hidden = !nextOpen;
+    zoomToggleButton.classList.toggle("is-active", nextOpen);
   }
 
-  rerenderForViewport.previousZoom = zoom;
+  function changeZoom(nextZoom) {
+    const boundedZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom));
 
-  modeButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      setMode(button.dataset.mode);
+    if (Math.abs(boundedZoom - zoom) < 0.001) {
+      return;
+    }
+
+    zoom = boundedZoom;
+    applyPanZoom();
+  }
+
+  if (modeCycleButton) {
+    modeCycleButton.addEventListener("click", cycleMode);
+  }
+
+  if (zoomToggleButton) {
+    zoomToggleButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleZoomPanel();
     });
+  }
+
+  if (zoomRange) {
+    zoomRange.addEventListener("input", () => {
+      changeZoom(Number(zoomRange.value) / 100);
+    });
+  }
+
+  document.addEventListener("click", (event) => {
+    if (!zoomControl || !zoomPanel || zoomPanel.hidden) {
+      return;
+    }
+
+    if (zoomControl.contains(event.target)) {
+      return;
+    }
+
+    toggleZoomPanel(false);
   });
 
   function updateFullscreenButton() {
@@ -264,7 +367,7 @@
       return;
     }
 
-    fullscreenToggleButton.textContent = document.fullscreenElement ? "Quitter plein ecran" : "Plein ecran";
+    fullscreenToggleButton.classList.toggle("is-active", Boolean(document.fullscreenElement));
   }
 
   if (fullscreenToggleButton) {
@@ -282,42 +385,6 @@
 
     document.addEventListener("fullscreenchange", updateFullscreenButton);
     updateFullscreenButton();
-  }
-
-  async function changeZoom(nextZoom) {
-    const boundedZoom = Math.min(4, Math.max(0.5, nextZoom));
-    const previousZoom = zoom;
-
-    if (Math.abs(boundedZoom - previousZoom) < 0.001) {
-      return;
-    }
-
-    zoom = boundedZoom;
-    rerenderForViewport.previousZoom = previousZoom;
-
-    try {
-      await rerenderForViewport(true);
-    } catch (error) {
-      showFallback(error instanceof Error ? error.message : "Impossible de recalculer le zoom.");
-    }
-  }
-
-  if (zoomInButton) {
-    zoomInButton.addEventListener("click", () => {
-      void changeZoom(zoom * 1.2);
-    });
-  }
-
-  if (zoomOutButton) {
-    zoomOutButton.addEventListener("click", () => {
-      void changeZoom(zoom / 1.2);
-    });
-  }
-
-  if (zoomResetButton) {
-    zoomResetButton.addEventListener("click", () => {
-      void changeZoom(1);
-    });
   }
 
   viewportNode.addEventListener("pointerdown", (event) => {
@@ -344,7 +411,7 @@
 
     offsetX = dragState.originX + (event.clientX - dragState.startX);
     offsetY = dragState.originY + (event.clientY - dragState.startY);
-    applyPan();
+    applyPanZoom();
   });
 
   function stopDrag(event) {
@@ -369,14 +436,14 @@
 
       if (event.ctrlKey) {
         event.preventDefault();
-        void changeZoom(zoom * (event.deltaY < 0 ? 1.08 : 1 / 1.08));
+        changeZoom(zoom * (event.deltaY < 0 ? 1.05 : 1 / 1.05));
         return;
       }
 
       event.preventDefault();
 
       if (currentMode === "horizontal") {
-        moveBy(-event.deltaY - event.deltaX, 0);
+        moveBy(-(event.deltaY + event.deltaX), 0);
         return;
       }
 
@@ -414,12 +481,14 @@
         event.preventDefault();
         moveBy(-step, 0);
         break;
+      case "Escape":
+        toggleZoomPanel(false);
+        break;
       default:
         break;
     }
   });
 
-  let resizeTimer = null;
   window.addEventListener("resize", () => {
     if (!pdfDocument) {
       return;
@@ -427,8 +496,10 @@
 
     window.clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(() => {
-      rerenderForViewport.previousZoom = zoom;
-      rerenderForViewport(true).catch((error) => {
+      renderDocument(pdfDocument, {
+        recenter: true,
+        preserveOffsets: false,
+      }).catch((error) => {
         showFallback(error instanceof Error ? error.message : "Impossible de recharger le PDF.");
       });
     }, 140);
@@ -458,12 +529,17 @@
         useSystemFonts: true,
       }).promise;
 
-      await renderDocument(pdfDocument);
+      await renderDocument(pdfDocument, {
+        recenter: true,
+        preserveOffsets: false,
+      });
     } catch (error) {
       showFallback(error instanceof Error ? error.message : "Impossible de charger le PDF.");
     }
   }
 
-  setMode("vertical");
+  updateModeButton();
+  updateZoomUi();
+  setMode("spread", { rerender: false });
   boot();
 })();
