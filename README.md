@@ -1,64 +1,65 @@
-# Le Kiosque
+# Le Kiosque Lite
 
-Application web moderne pour lire des journaux PDF, classés par date, avec :
-
-- accueil réactif sur les 30 éditions les plus récentes
-- archives regroupées par année puis par mois
-- lecteur PDF personnalisé avec mode vertical et horizontal
-- panneau admin protégé par mot de passe chiffré
-- surveillance de flux RSS/Torznab
-- récupération automatique via torrent
-- génération de miniature de première page
-- mise à jour temps réel sans rafraîchissement manuel
+Lecteur web de journaux PDF en stack legere, sans build frontend.
 
 ## Stack
 
-- `Next.js 16`
-- `React 19`
-- `TypeScript`
+- `Node.js 20+`
 - `better-sqlite3`
-- `react-pdf` + `pdfjs-dist`
+- `fast-xml-parser`
 - `webtorrent`
-- `@napi-rs/canvas`
-- `Tailwind CSS 4`
+- HTML rendu cote serveur
+- JavaScript navigateur minimal pour SSE et rendu PDF
 
-## Lancement rapide sur Linux
+## Pourquoi cette version
 
-1. Copier le fichier d'exemple :
+Cette version remplace `Next.js` et `React` par un seul serveur `node server.js`.
+
+Objectif :
+
+- demarrage simple sur Linux
+- pas d'etape `build`
+- consommation memoire beaucoup plus basse
+- installation via `npm install`
+
+## Fonctionnalites
+
+- accueil avec les 30 journaux les plus recents
+- archives par annee puis par mois
+- cartes avec miniature de premiere page rendue dans le navigateur
+- lecteur PDF personnalise
+- mode `Vertical`
+- mode `Horizontal`
+- page Parametres protegee par mot de passe admin chiffre avec `scrypt`
+- ajout et suppression des termes de recherche
+- ajout et suppression des flux RSS / Torznab
+- scan RSS automatique et manuel
+- ingestion torrent
+- prevention des doublons par nom/date, `guid` et `info_hash`
+- mise a jour temps reel par SSE
+
+## Lancement rapide
 
 ```bash
 cp .env.example .env.local
-```
-
-2. Renseigner au minimum `DEFAULT_RSS_FEEDS` si tu veux précharger des flux au premier démarrage.
-
-3. Installer :
-
-```bash
 npm install
+npm start
 ```
 
-4. Démarrer :
-
-```bash
-npm run dev
-```
-
-5. Ouvrir :
+Puis ouvre :
 
 ```text
 http://localhost:3000
 ```
 
-Au premier lancement, va sur `/setup` ou clique sur `Parametres` pour définir le mot de passe administrateur.
+Au premier lancement, ouvre `/setup` pour definir le mot de passe administrateur.
 
-## Production Linux
+## Variables d'environnement
 
-```bash
-npm install
-npm run build
-PORT=3000 npm run start
-```
+- `PORT` : port HTTP
+- `JOURNAL_DB_PATH` : chemin SQLite
+- `JOURNAL_STORAGE_DIR` : dossier des PDF telecharges
+- `DEFAULT_RSS_FEEDS` : flux RSS/Torznab separes par virgule ou retour ligne
 
 ## Docker
 
@@ -66,22 +67,9 @@ PORT=3000 npm run start
 docker compose up --build
 ```
 
-Le service publie par défaut sur le port `3000`.
+## Notes techniques
 
-## Variables d'environnement
-
-Voir `.env.example`.
-
-Variables principales :
-
-- `JOURNAL_DB_PATH` : chemin SQLite, défaut `./data/journal.sqlite`
-- `JOURNAL_STORAGE_DIR` : répertoire des PDF et miniatures, défaut `./storage`
-- `DEFAULT_RSS_FEEDS` : liste de flux séparés par virgule ou retour ligne
-
-## Notes d'architecture
-
-- L'application démarre le watcher RSS dans le process Node de Next.js.
-- Les doublons sont bloqués par une contrainte unique `publication_key + publication_date`.
-- Le mot de passe admin est hashé avec `argon2id`.
-- Les PDF sont servis par route API depuis `storage/`.
-- Les nouveaux journaux déclenchent un événement SSE et l'accueil se rafraîchit automatiquement.
+- Le rendu des miniatures et du lecteur PDF repose sur `pdf.js` charge cote navigateur.
+- Les PDF sont servis depuis `storage/` via la route `/files/...`.
+- Le scan RSS tourne dans le meme process Node que l'application web.
+- Cette pile est concue pour les petits serveurs ou les environnements SSH limites.

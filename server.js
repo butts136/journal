@@ -1,0 +1,1634 @@
+const http = require("node:http");
+const fs = require("node:fs");
+const fsp = require("node:fs/promises");
+const path = require("node:path");
+const crypto = require("node:crypto");
+
+const Database = require("better-sqlite3");
+const { XMLParser } = require("fast-xml-parser");
+
+loadEnvFile(path.join(process.cwd(), ".env.local"));
+
+const APP_NAME = "Le Kiosque";
+const RECENT_JOURNALS_LIMIT = 30;
+const AUTH_COOKIE_NAME = "journal_admin_session";
+const DEFAULT_POLL_INTERVAL_SECONDS = 180;
+const PORT = Number(process.env.PORT || 3000);
+const DATABASE_PATH =
+  process.env.JOURNAL_DB_PATH || path.join(process.cwd(), "data", "journal.sqlite");
+const STORAGE_ROOT =
+  process.env.JOURNAL_STORAGE_DIR || path.join(process.cwd(), "storage");
+const PUBLIC_ROOT = path.join(process.cwd(), "public");
+const PDFJS_URL =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+
+const runtime = {
+  db: null,
+  eventClients: new Set(),
+  scanPromise: null,
+  scanInterval: null,
+  scanState: {
+    running: false,
+    lastSuccessAt: null,
+    lastError: null,
+  },
+  torrentClientPromise: null,
+};
+
+const parser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "",
+  parseAttributeValue: true,
+  trimValues: true,
+});
+
+const MONTH_NAMES = [
+  "Janvier",
+  "Fevrier",
+  "Mars",
+  "Avril",
+  "Mai",
+  "Juin",
+  "Juillet",
+  "Aout",
+  "Septembre",
+  "Octobre",
+  "Novembre",
+  "Decembre",
+];
+
+const MONTH_TOKENS = new Map([
+  ["jan", 0],
+  ["janvier", 0],
+  ["january", 0],
+  ["fev", 1],
+  ["fevr", 1],
+  ["fevrier", 1],
+  ["feb", 1],
+  ["february", 1],
+  ["mar", 2],
+  ["mars", 2],
+  ["march", 2],
+  ["avr", 3],
+  ["avril", 3],
+  ["apr", 3],
+  ["april", 3],
+  ["mai", 4],
+  ["may", 4],
+  ["jun", 5],
+  ["juin", 5],
+  ["june", 5],
+  ["jul", 6],
+  ["juil", 6],
+  ["juillet", 6],
+  ["july", 6],
+  ["aou", 7],
+  ["aout", 7],
+  ["aug", 7],
+  ["august", 7],
+  ["sep", 8],
+  ["sept", 8],
+  ["septembre", 8],
+  ["september", 8],
+  ["oct", 9],
+  ["octobre", 9],
+  ["october", 9],
+  ["nov", 10],
+  ["novembre", 10],
+  ["november", 10],
+  ["dec", 11],
+  ["decembre", 11],
+  ["december", 11],
+]);
+
+const DATE_PATTERN =
+  /\b(\d{1,2})(?:\s+(\d{1,2}))?\s+(janvier|january|jan|fevrier|february|fevr|fev|feb|mars|march|mar|avril|april|avr|apr|mai|may|juin|june|jun|juillet|july|juil|jul|aout|august|aou|aug|septembre|september|sept|sep|octobre|october|oct|novembre|november|nov|decembre|december|dec)\s+(\d{4})\b/i;
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return;
+  }
+
+  const raw = fs.readFileSync(filePath, "utf8");
+
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const separatorIndex = trimmed.indexOf("=");
+
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1).trim();
+
+    if (key && !process.env[key]) {
+      process.env[key] = value;
+    }
+  }
+}
+
+function ensureDir(dirPath) {
+  fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[\[\]().,_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function slugify(value) {
+  return normalizeText(value).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function readCookies(request) {
+  const raw = request.headers.cookie || "";
+  const entries = raw.split(/;\s*/).filter(Boolean);
+  const cookies = {};
+
+  for (const entry of entries) {
+    const index = entry.indexOf("=");
+    if (index === -1) {
+      continue;
+    }
+    const key = entry.slice(0, index);
+    const value = entry.slice(index + 1);
+    cookies[key] = decodeURIComponent(value);
+  }
+
+  return cookies;
+}
+
+function createSignedCookie(payload, secret) {
+  const data = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto.createHmac("sha256", secret).update(data).digest("base64url");
+  return `${data}.${signature}`;
+}
+
+function verifySignedCookie(token, secret) {
+  if (!token || !secret) {
+    return null;
+  }
+
+  const [data, signature] = token.split(".");
+
+  if (!data || !signature) {
+    return null;
+  }
+
+  const expected = crypto.createHmac("sha256", secret).update(data).digest("base64url");
+
+  if (signature.length !== expected.length) {
+    return null;
+  }
+
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return null;
+  }
+
+  const payload = JSON.parse(Buffer.from(data, "base64url").toString("utf8"));
+
+  if (!payload || payload.exp < Date.now()) {
+    return null;
+  }
+
+  return payload;
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString("base64url");
+  const derived = crypto.scryptSync(password, salt, 64).toString("base64url");
+  return `scrypt$${salt}$${derived}`;
+}
+
+function verifyPassword(password, storedHash) {
+  if (!storedHash || !storedHash.startsWith("scrypt$")) {
+    return false;
+  }
+
+  const [, salt, hash] = storedHash.split("$");
+
+  if (!salt || !hash) {
+    return false;
+  }
+
+  const derived = crypto.scryptSync(password, salt, 64).toString("base64url");
+  return crypto.timingSafeEqual(Buffer.from(derived), Buffer.from(hash));
+}
+
+function initializeDatabase(db) {
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_config (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      admin_password_hash TEXT,
+      session_secret TEXT NOT NULL,
+      poll_interval_seconds INTEGER NOT NULL DEFAULT 180,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS rss_feeds (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL UNIQUE,
+      is_enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS search_terms (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT NOT NULL UNIQUE,
+      normalized_label TEXT NOT NULL UNIQUE,
+      is_enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS journals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      publication_name TEXT NOT NULL,
+      publication_key TEXT NOT NULL,
+      publication_date TEXT NOT NULL,
+      display_title TEXT NOT NULL,
+      source_title TEXT NOT NULL,
+      source_guid TEXT,
+      source_url TEXT,
+      source_feed_id INTEGER,
+      torrent_url TEXT,
+      info_hash TEXT,
+      cover_url TEXT,
+      pdf_relative_path TEXT,
+      thumbnail_relative_path TEXT,
+      page_count INTEGER,
+      file_size INTEGER,
+      status TEXT NOT NULL DEFAULT 'queued',
+      error_message TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(publication_key, publication_date),
+      UNIQUE(source_guid),
+      UNIQUE(info_hash),
+      FOREIGN KEY (source_feed_id) REFERENCES rss_feeds(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_journals_publication_date ON journals(publication_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_journals_status ON journals(status);
+  `);
+
+  const existing = db.prepare("SELECT id FROM app_config WHERE id = 1").get();
+  if (!existing) {
+    db.prepare(
+      "INSERT INTO app_config (id, session_secret) VALUES (1, ?)",
+    ).run(crypto.randomBytes(32).toString("base64url"));
+  }
+}
+
+function getDb() {
+  if (!runtime.db) {
+    ensureDir(path.dirname(DATABASE_PATH));
+    runtime.db = new Database(DATABASE_PATH);
+    initializeDatabase(runtime.db);
+  }
+
+  return runtime.db;
+}
+
+function getAppConfig() {
+  const row = getDb()
+    .prepare(
+      "SELECT admin_password_hash, session_secret, poll_interval_seconds FROM app_config WHERE id = 1",
+    )
+    .get();
+
+  return {
+    adminPasswordHash: row.admin_password_hash,
+    sessionSecret: row.session_secret,
+    pollIntervalSeconds: row.poll_interval_seconds || DEFAULT_POLL_INTERVAL_SECONDS,
+  };
+}
+
+function isConfigured() {
+  return Boolean(getAppConfig().adminPasswordHash);
+}
+
+function setAdminPassword(password) {
+  const passwordHash = hashPassword(password);
+  getDb()
+    .prepare(
+      "UPDATE app_config SET admin_password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+    )
+    .run(passwordHash);
+}
+
+function getEnabledFeeds() {
+  return getDb().prepare("SELECT * FROM rss_feeds WHERE is_enabled = 1 ORDER BY id ASC").all();
+}
+
+function getAllFeeds() {
+  return getDb()
+    .prepare("SELECT * FROM rss_feeds ORDER BY created_at ASC, id ASC")
+    .all();
+}
+
+function seedFeedsIfEmpty(urls) {
+  const cleaned = [...new Set(urls.map((url) => url.trim()).filter(Boolean))];
+
+  if (!cleaned.length) {
+    return;
+  }
+
+  const count = getDb().prepare("SELECT COUNT(*) AS count FROM rss_feeds").get().count;
+  if (count > 0) {
+    return;
+  }
+
+  const statement = getDb().prepare("INSERT OR IGNORE INTO rss_feeds (name, url) VALUES (?, ?)");
+  cleaned.forEach((url, index) => {
+    statement.run(`Flux RSS ${index + 1}`, url);
+  });
+}
+
+function addFeed(name, url) {
+  const cleanName = String(name || "").trim();
+  const cleanUrl = String(url || "").trim();
+
+  if (!cleanName || !cleanUrl) {
+    return;
+  }
+
+  getDb()
+    .prepare("INSERT OR IGNORE INTO rss_feeds (name, url) VALUES (?, ?)")
+    .run(cleanName, cleanUrl);
+}
+
+function removeFeed(id) {
+  getDb().prepare("DELETE FROM rss_feeds WHERE id = ?").run(id);
+}
+
+function getEnabledSearchTerms() {
+  return getDb()
+    .prepare("SELECT * FROM search_terms WHERE is_enabled = 1 ORDER BY id ASC")
+    .all();
+}
+
+function getAllSearchTerms() {
+  return getDb()
+    .prepare("SELECT * FROM search_terms ORDER BY created_at ASC, id ASC")
+    .all();
+}
+
+function addSearchTerm(label) {
+  const cleanLabel = String(label || "").trim();
+  const normalizedLabel = normalizeText(cleanLabel);
+
+  if (!cleanLabel || !normalizedLabel) {
+    return;
+  }
+
+  getDb()
+    .prepare("INSERT OR IGNORE INTO search_terms (label, normalized_label) VALUES (?, ?)")
+    .run(cleanLabel, normalizedLabel);
+}
+
+function removeSearchTerm(id) {
+  getDb().prepare("DELETE FROM search_terms WHERE id = ?").run(id);
+}
+
+function createJournalIfMissing(input) {
+  const existing = getDb()
+    .prepare(
+      `
+        SELECT id
+        FROM journals
+        WHERE (source_guid IS NOT NULL AND source_guid = @sourceGuid)
+           OR (info_hash IS NOT NULL AND info_hash = @infoHash)
+           OR (publication_key = @publicationKey AND publication_date = @publicationDate)
+        LIMIT 1
+      `,
+    )
+    .get(input);
+
+  if (existing) {
+    return { id: existing.id, created: false };
+  }
+
+  const result = getDb()
+    .prepare(
+      `
+        INSERT INTO journals (
+          publication_name,
+          publication_key,
+          publication_date,
+          display_title,
+          source_title,
+          source_guid,
+          source_url,
+          source_feed_id,
+          torrent_url,
+          info_hash,
+          cover_url,
+          status
+        )
+        VALUES (@publicationName, @publicationKey, @publicationDate, @displayTitle, @sourceTitle,
+                @sourceGuid, @sourceUrl, @sourceFeedId, @torrentUrl, @infoHash, @coverUrl, 'queued')
+      `,
+    )
+    .run(input);
+
+  return { id: Number(result.lastInsertRowid), created: true };
+}
+
+function updateJournalStatus(id, status, extra = {}) {
+  const fields = { status, ...extra };
+  const columns = Object.keys(fields)
+    .map((key) => `${key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)} = @${key}`)
+    .join(", ");
+
+  getDb()
+    .prepare(`UPDATE journals SET ${columns}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
+    .run({ id, ...fields });
+}
+
+function getJournalById(id) {
+  return getDb().prepare("SELECT * FROM journals WHERE id = ?").get(id) || null;
+}
+
+function getRecentJournals(limit = RECENT_JOURNALS_LIMIT) {
+  return getDb()
+    .prepare(
+      `
+        SELECT *
+        FROM journals
+        WHERE status = 'ready'
+        ORDER BY publication_date DESC, id DESC
+        LIMIT ?
+      `,
+    )
+    .all(limit);
+}
+
+function getArchivedJournals(offset = RECENT_JOURNALS_LIMIT) {
+  return getDb()
+    .prepare(
+      `
+        SELECT *
+        FROM journals
+        WHERE status = 'ready'
+        ORDER BY publication_date DESC, id DESC
+        LIMIT -1 OFFSET ?
+      `,
+    )
+    .all(offset);
+}
+
+function getStatusSnapshot() {
+  const db = getDb();
+  const readyCount = db.prepare("SELECT COUNT(*) AS count FROM journals WHERE status = 'ready'").get()
+    .count;
+  const downloadingCount = db
+    .prepare("SELECT COUNT(*) AS count FROM journals WHERE status = 'downloading'")
+    .get().count;
+
+  return {
+    readyCount,
+    downloadingCount,
+    feedCount: getAllFeeds().length,
+    termCount: getAllSearchTerms().length,
+    scanRunning: runtime.scanState.running,
+    lastSuccessAt: runtime.scanState.lastSuccessAt,
+    lastError: runtime.scanState.lastError,
+  };
+}
+
+function toDateKey(date) {
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function parseDateKey(dateKey) {
+  if (!dateKey) {
+    return null;
+  }
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!match) {
+    return null;
+  }
+
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12));
+}
+
+function formatFrenchDate(date) {
+  return `${String(date.getUTCDate()).padStart(2, "0")} ${
+    MONTH_NAMES[date.getUTCMonth()]
+  } ${date.getUTCFullYear()}`;
+}
+
+function getArchiveLabel(date) {
+  return `${MONTH_NAMES[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
+function extractPublicationDateFromTitle(title) {
+  const normalized = normalizeText(title);
+  const match = normalized.match(DATE_PATTERN);
+
+  if (!match) {
+    return null;
+  }
+
+  const day = Number(match[2] || match[1]);
+  const month = MONTH_TOKENS.get(match[3].toLowerCase());
+  const year = Number(match[4]);
+
+  if (month === undefined || day < 1 || day > 31) {
+    return null;
+  }
+
+  const parsed = new Date(Date.UTC(year, month, day, 12, 0, 0));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatBytes(value) {
+  const size = Number(value || 0);
+  if (!size) {
+    return "Taille inconnue";
+  }
+
+  const units = ["o", "Ko", "Mo", "Go", "To"];
+  let current = size;
+  let unitIndex = 0;
+
+  while (current >= 1024 && unitIndex < units.length - 1) {
+    current /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${current.toFixed(current >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function buildJournalStoragePaths(publicationKey, dateKey) {
+  const relativeDir = path.posix.join("journals", publicationKey, dateKey);
+  const absoluteDir = path.join(STORAGE_ROOT, relativeDir);
+
+  return {
+    relativeDir,
+    absoluteDir,
+    pdfRelativePath: path.posix.join(relativeDir, "journal.pdf"),
+    pdfAbsolutePath: path.join(absoluteDir, "journal.pdf"),
+  };
+}
+
+function resolveManagedPath(relativePath) {
+  const root = path.resolve(STORAGE_ROOT);
+  const absolutePath = path.resolve(STORAGE_ROOT, relativePath);
+
+  if (absolutePath !== root && !absolutePath.startsWith(`${root}${path.sep}`)) {
+    throw new Error("Chemin hors du stockage gere.");
+  }
+
+  return absolutePath;
+}
+
+function toManagedFileUrl(relativePath) {
+  if (!relativePath) {
+    return null;
+  }
+
+  return `/files/${relativePath.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function getAttrValue(raw, key) {
+  if (!raw) {
+    return null;
+  }
+
+  const entries = Array.isArray(raw) ? raw : [raw];
+  const match = entries.find((entry) => entry && entry.name === key);
+  return match && match.value ? String(match.value) : null;
+}
+
+function withQuery(urlString, query) {
+  const target = new URL(urlString);
+  if (target.searchParams.get("t") === "search") {
+    target.searchParams.set("q", query);
+  }
+  return target.toString();
+}
+
+async function fetchRssItems(feedUrl, query) {
+  const targetUrl = query ? withQuery(feedUrl, query) : feedUrl;
+  const response = await fetch(targetUrl, {
+    cache: "no-store",
+    headers: {
+      "user-agent": "Le-Kiosque-Lite/1.0",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Flux RSS inaccessible: ${response.status}`);
+  }
+
+  const xml = await response.text();
+  const parsed = parser.parse(xml);
+  const rawItems = parsed && parsed.rss && parsed.rss.channel ? parsed.rss.channel.item || [] : [];
+  const items = Array.isArray(rawItems) ? rawItems : [rawItems];
+
+  return items.filter(Boolean).map((item) => ({
+    title: String(item.title || ""),
+    guid: item.guid ? String(item.guid) : null,
+    pubDate: item.pubDate ? String(item.pubDate) : null,
+    comments: item.comments ? String(item.comments) : null,
+    link: item.link ? String(item.link) : null,
+    enclosureUrl: item.enclosure && item.enclosure.url ? String(item.enclosure.url) : null,
+    size: item.size ? Number(item.size) : null,
+    coverUrl: getAttrValue(item["torznab:attr"], "coverurl"),
+    infoHash: getAttrValue(item["torznab:attr"], "infohash"),
+  }));
+}
+
+function isQueryableSearchFeed(feedUrl) {
+  try {
+    return new URL(feedUrl).searchParams.get("t") === "search";
+  } catch {
+    return false;
+  }
+}
+
+function parseJournalCandidate(item, searchTerms) {
+  const normalizedTitle = normalizeText(item.title);
+
+  if (!normalizedTitle.includes("pdf") && !normalizedTitle.includes("ebook")) {
+    return null;
+  }
+
+  const publicationDate = extractPublicationDateFromTitle(item.title);
+  if (!publicationDate) {
+    return null;
+  }
+
+  const matchingTerm = searchTerms
+    .filter((term) => normalizedTitle.includes(term.normalized_label))
+    .sort((left, right) => right.normalized_label.length - left.normalized_label.length)[0];
+
+  if (!matchingTerm) {
+    return null;
+  }
+
+  return {
+    publicationName: matchingTerm.label,
+    publicationKey: slugify(matchingTerm.label),
+    publicationDate,
+    publicationDateKey: toDateKey(publicationDate),
+    displayTitle: `${matchingTerm.label} - ${formatFrenchDate(publicationDate)}`,
+  };
+}
+
+async function getTorrentClient() {
+  if (!runtime.torrentClientPromise) {
+    runtime.torrentClientPromise = import("webtorrent").then((module) => {
+      const WebTorrent = module.default;
+      return new WebTorrent();
+    });
+  }
+
+  return runtime.torrentClientPromise;
+}
+
+async function downloadLargestPdfFromTorrent(sourceUrl, outputPath) {
+  const client = await getTorrentClient();
+  ensureDir(path.dirname(outputPath));
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let currentInfoHash = "";
+
+    const fail = (error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+
+      if (currentInfoHash) {
+        client.remove(currentInfoHash, () => reject(error));
+        return;
+      }
+
+      reject(error);
+    };
+
+    client.add(sourceUrl, { destroyStoreOnDestroy: true }, (torrent) => {
+      currentInfoHash = torrent.infoHash;
+      torrent.on("error", fail);
+
+      const selectedPdf = torrent.files
+        .filter((file) => file.name.toLowerCase().endsWith(".pdf"))
+        .sort((left, right) => right.length - left.length)[0];
+
+      if (!selectedPdf) {
+        fail(new Error("Aucun fichier PDF n'a ete trouve dans ce torrent."));
+        return;
+      }
+
+      selectedPdf.select();
+      const readStream = selectedPdf.createReadStream();
+      const writeStream = fs.createWriteStream(outputPath);
+
+      readStream.on("error", fail);
+      writeStream.on("error", fail);
+      writeStream.on("finish", () => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        const bytes = fs.statSync(outputPath).size;
+        client.remove(torrent.infoHash, () => {
+          resolve({
+            bytes,
+            fileName: selectedPdf.name,
+          });
+        });
+      });
+
+      readStream.pipe(writeStream);
+    });
+  });
+}
+
+function broadcastEvent(type, payload) {
+  const message = `event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`;
+
+  for (const response of [...runtime.eventClients]) {
+    try {
+      response.write(message);
+    } catch {
+      runtime.eventClients.delete(response);
+    }
+  }
+}
+
+async function processFeedItem(feedId, item) {
+  const parsed = parseJournalCandidate(item, getEnabledSearchTerms());
+  if (!parsed) {
+    return;
+  }
+
+  const journal = createJournalIfMissing({
+    publicationName: parsed.publicationName,
+    publicationKey: parsed.publicationKey,
+    publicationDate: parsed.publicationDateKey,
+    displayTitle: parsed.displayTitle,
+    sourceTitle: item.title,
+    sourceGuid: item.guid,
+    sourceUrl: item.comments || item.link,
+    sourceFeedId: feedId,
+    torrentUrl: item.enclosureUrl || item.link,
+    infoHash: item.infoHash,
+    coverUrl: item.coverUrl,
+  });
+
+  if (!journal.created) {
+    return;
+  }
+
+  if (!item.enclosureUrl && !item.link) {
+    updateJournalStatus(journal.id, "error", {
+      errorMessage: "Le torrent ne fournit aucun lien exploitable.",
+    });
+    return;
+  }
+
+  updateJournalStatus(journal.id, "downloading", { errorMessage: null });
+
+  try {
+    const storagePaths = buildJournalStoragePaths(parsed.publicationKey, parsed.publicationDateKey);
+    const download = await downloadLargestPdfFromTorrent(
+      item.enclosureUrl || item.link,
+      storagePaths.pdfAbsolutePath,
+    );
+
+    updateJournalStatus(journal.id, "ready", {
+      pdfRelativePath: storagePaths.pdfRelativePath,
+      thumbnailRelativePath: null,
+      pageCount: null,
+      fileSize: download.bytes,
+      errorMessage: null,
+    });
+
+    broadcastEvent("journal-updated", {
+      id: journal.id,
+      title: parsed.displayTitle,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Echec inconnu.";
+    updateJournalStatus(journal.id, "error", { errorMessage: message });
+    broadcastEvent("journal-error", { id: journal.id, message });
+  }
+}
+
+async function scanFeed(feed, termLabel) {
+  const items = await fetchRssItems(feed.url, termLabel);
+
+  for (const item of items) {
+    await processFeedItem(feed.id, item);
+  }
+}
+
+async function runScanCycle() {
+  const feeds = getEnabledFeeds();
+  const terms = getEnabledSearchTerms();
+
+  if (!feeds.length || !terms.length) {
+    return;
+  }
+
+  runtime.scanState.running = true;
+  runtime.scanState.lastError = null;
+  broadcastEvent("scan-started", { time: Date.now() });
+
+  try {
+    for (const feed of feeds) {
+      if (isQueryableSearchFeed(feed.url)) {
+        for (const term of terms) {
+          await scanFeed(feed, term.label);
+        }
+      } else {
+        await scanFeed(feed);
+      }
+    }
+
+    runtime.scanState.lastSuccessAt = new Date().toISOString();
+  } catch (error) {
+    runtime.scanState.lastError =
+      error instanceof Error ? error.message : "Echec inconnu pendant le scan.";
+    throw error;
+  } finally {
+    runtime.scanState.running = false;
+    broadcastEvent("scan-finished", {
+      time: Date.now(),
+      error: runtime.scanState.lastError,
+    });
+  }
+}
+
+async function triggerScanNow() {
+  if (runtime.scanPromise) {
+    return runtime.scanPromise;
+  }
+
+  runtime.scanPromise = runScanCycle().finally(() => {
+    runtime.scanPromise = null;
+  });
+
+  return runtime.scanPromise;
+}
+
+function getDefaultFeedUrls() {
+  return String(process.env.DEFAULT_RSS_FEEDS || "")
+    .split(/\r?\n|,/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function ensureBootstrap() {
+  ensureDir(STORAGE_ROOT);
+  ensureDir(path.join(process.cwd(), "data"));
+  seedFeedsIfEmpty(getDefaultFeedUrls());
+
+  if (runtime.scanInterval) {
+    return;
+  }
+
+  triggerScanNow().catch(() => {});
+  runtime.scanInterval = setInterval(() => {
+    triggerScanNow().catch(() => {});
+  }, getAppConfig().pollIntervalSeconds * 1000);
+}
+
+function readRequestBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+
+    request.on("data", (chunk) => {
+      size += chunk.length;
+
+      if (size > 1024 * 1024) {
+        reject(new Error("Corps de requete trop volumineux."));
+        request.destroy();
+        return;
+      }
+
+      chunks.push(chunk);
+    });
+
+    request.on("end", () => {
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+
+    request.on("error", reject);
+  });
+}
+
+async function readForm(request) {
+  const body = await readRequestBody(request);
+  return Object.fromEntries(new URLSearchParams(body));
+}
+
+function isAdminAuthenticated(request) {
+  if (!isConfigured()) {
+    return false;
+  }
+
+  const cookies = readCookies(request);
+  const payload = verifySignedCookie(cookies[AUTH_COOKIE_NAME], getAppConfig().sessionSecret);
+  return Boolean(payload && payload.role === "admin");
+}
+
+function adminCookieHeader() {
+  const token = createSignedCookie(
+    {
+      role: "admin",
+      exp: Date.now() + 14 * 24 * 60 * 60 * 1000,
+    },
+    getAppConfig().sessionSecret,
+  );
+
+  return `${AUTH_COOKIE_NAME}=${encodeURIComponent(
+    token,
+  )}; HttpOnly; Path=/; SameSite=Lax; Max-Age=1209600`;
+}
+
+function clearAdminCookieHeader() {
+  return `${AUTH_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`;
+}
+
+function sendHtml(response, statusCode, html, headers = {}) {
+  response.writeHead(statusCode, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    ...headers,
+  });
+  response.end(html);
+}
+
+function sendText(response, statusCode, text, headers = {}) {
+  response.writeHead(statusCode, {
+    "content-type": "text/plain; charset=utf-8",
+    ...headers,
+  });
+  response.end(text);
+}
+
+function redirect(response, location, headers = {}) {
+  response.writeHead(303, {
+    location,
+    ...headers,
+  });
+  response.end();
+}
+
+function getFlash(searchParams) {
+  const type = searchParams.get("type");
+  const text = searchParams.get("message");
+
+  if (!type || !text) {
+    return "";
+  }
+
+  return `<div class="flash flash-${escapeHtml(type)}">${escapeHtml(text)}</div>`;
+}
+
+function renderShell({ title, body, currentPath = "/", scripts = [] }) {
+  const configured = isConfigured();
+  const settingsHref = configured ? "/settings" : "/setup";
+
+  return `<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)} | ${APP_NAME}</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="/">
+          <span class="brand-mark">LK</span>
+          <span>
+            <strong>${APP_NAME}</strong>
+            <small>Lecteur de journaux PDF</small>
+          </span>
+        </a>
+        <nav class="nav">
+          <a class="${currentPath === "/" ? "is-active" : ""}" href="/">Accueil</a>
+          <a class="${currentPath === "/archives" ? "is-active" : ""}" href="/archives">Archives</a>
+          <a class="${currentPath === "/settings" || currentPath === "/setup" ? "is-active" : ""}" href="${settingsHref}">Parametres</a>
+        </nav>
+      </header>
+      <main class="page-content">${body}</main>
+    </div>
+    ${scripts.map((src) => `<script src="${src}"></script>`).join("\n")}
+  </body>
+</html>`;
+}
+
+function renderJournalCard(journal) {
+  const pdfUrl = toManagedFileUrl(journal.pdf_relative_path);
+  const date = parseDateKey(journal.publication_date);
+  const meta = [
+    date ? formatFrenchDate(date) : journal.publication_date,
+    journal.file_size ? formatBytes(journal.file_size) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return `<a class="journal-card" href="/journal/${journal.id}" data-pdf-url="${escapeHtml(
+    pdfUrl || "",
+  )}">
+    <div class="journal-thumb">
+      <canvas aria-hidden="true"></canvas>
+      <div class="journal-thumb-fallback">PDF</div>
+    </div>
+    <div class="journal-copy">
+      <strong>${escapeHtml(journal.display_title)}</strong>
+      <span>${escapeHtml(meta)}</span>
+    </div>
+  </a>`;
+}
+
+function renderJournalGrid(journals) {
+  if (!journals.length) {
+    return `<div class="empty-state">
+      <strong>Aucun journal pret.</strong>
+      <p>Ajoute un terme de recherche et un flux RSS dans Parametres pour commencer l'ingestion.</p>
+    </div>`;
+  }
+
+  return `<div class="journal-grid">${journals.map(renderJournalCard).join("")}</div>`;
+}
+
+function renderHomePage(searchParams) {
+  const journals = getRecentJournals();
+  const snapshot = getStatusSnapshot();
+
+  return renderShell({
+    title: "Accueil",
+    currentPath: "/",
+    scripts: [PDFJS_URL, "/static/app.js"],
+    body: `
+      <section class="hero">
+        <div>
+          <span class="eyebrow">Flux en direct</span>
+          <h1>Les 30 journaux les plus recents, sans rafraichir la page.</h1>
+          <p>L'accueil se met a jour via SSE des qu'un nouveau PDF est telecharge.</p>
+        </div>
+        <div class="hero-stats">
+          <div><strong>${snapshot.readyCount}</strong><span>PDF prets</span></div>
+          <div><strong>${snapshot.downloadingCount}</strong><span>telechargements</span></div>
+          <div><strong>${snapshot.feedCount}</strong><span>flux RSS</span></div>
+          <div><strong>${snapshot.termCount}</strong><span>termes actifs</span></div>
+        </div>
+      </section>
+      ${getFlash(searchParams)}
+      <section class="section-head">
+        <h2>Dernieres editions</h2>
+        <a href="/archives">Voir les archives</a>
+      </section>
+      ${renderJournalGrid(journals)}
+    `,
+  });
+}
+
+function groupArchivedJournals(journals) {
+  const groups = new Map();
+
+  journals.forEach((journal) => {
+    const date = parseDateKey(journal.publication_date);
+    if (!date) {
+      return;
+    }
+
+    const year = String(date.getUTCFullYear());
+    const month = getArchiveLabel(date);
+
+    if (!groups.has(year)) {
+      groups.set(year, new Map());
+    }
+
+    const months = groups.get(year);
+    if (!months.has(month)) {
+      months.set(month, []);
+    }
+
+    months.get(month).push(journal);
+  });
+
+  return groups;
+}
+
+function renderArchivesPage(searchParams) {
+  const groups = groupArchivedJournals(getArchivedJournals());
+  const sections = [...groups.entries()]
+    .sort((left, right) => Number(right[0]) - Number(left[0]))
+    .map(([year, months]) => {
+      const monthBlocks = [...months.entries()].map(
+        ([month, journals]) => `<section class="archive-month">
+          <h3>${escapeHtml(month)}</h3>
+          ${renderJournalGrid(journals)}
+        </section>`,
+      );
+
+      return `<section class="archive-year">
+        <h2>${escapeHtml(year)}</h2>
+        ${monthBlocks.join("")}
+      </section>`;
+    })
+    .join("");
+
+  return renderShell({
+    title: "Archives",
+    currentPath: "/archives",
+    scripts: [PDFJS_URL, "/static/app.js"],
+    body: `
+      <section class="hero hero-compact">
+        <div>
+          <span class="eyebrow">Classement historique</span>
+          <h1>Archives par annee et par mois</h1>
+          <p>Les 30 plus recents restent sur l'accueil. Le reste est range ici.</p>
+        </div>
+      </section>
+      ${getFlash(searchParams)}
+      ${sections || '<div class="empty-state"><strong>Aucune archive.</strong></div>'}
+    `,
+  });
+}
+
+function renderSetupPage(searchParams) {
+  if (isConfigured()) {
+    return null;
+  }
+
+  return renderShell({
+    title: "Configuration initiale",
+    currentPath: "/setup",
+    body: `
+      <section class="panel narrow">
+        <span class="eyebrow">Premier lancement</span>
+        <h1>Choisir le mot de passe administrateur</h1>
+        <p>Il sera chiffre localement avec <code>scrypt</code> et servira a proteger les Parametres.</p>
+        ${getFlash(searchParams)}
+        <form method="post" action="/setup" class="stack-form">
+          <label>Mot de passe
+            <input type="password" name="password" required minlength="8" autocomplete="new-password" />
+          </label>
+          <label>Confirmation
+            <input type="password" name="confirmPassword" required minlength="8" autocomplete="new-password" />
+          </label>
+          <button type="submit">Activer l'administration</button>
+        </form>
+      </section>
+    `,
+  });
+}
+
+function renderSettingsPage(request, searchParams) {
+  if (!isConfigured()) {
+    return null;
+  }
+
+  if (!isAdminAuthenticated(request)) {
+    return renderShell({
+      title: "Connexion admin",
+      currentPath: "/settings",
+      body: `
+        <section class="panel narrow">
+          <span class="eyebrow">Zone protegee</span>
+          <h1>Connexion administrateur</h1>
+          ${getFlash(searchParams)}
+          <form method="post" action="/login" class="stack-form">
+            <label>Mot de passe
+              <input type="password" name="password" required autocomplete="current-password" />
+            </label>
+            <button type="submit">Se connecter</button>
+          </form>
+        </section>
+      `,
+    });
+  }
+
+  const snapshot = getStatusSnapshot();
+  const terms = getAllSearchTerms();
+  const feeds = getAllFeeds();
+
+  return renderShell({
+    title: "Parametres",
+    currentPath: "/settings",
+    body: `
+      <section class="hero hero-compact">
+        <div>
+          <span class="eyebrow">Administration</span>
+          <h1>Pilotage des flux et des termes de recherche</h1>
+          <p>Les accents sont ignores pendant la recherche. "Montreal" et "Montr&eacute;al" seront traites pareil.</p>
+        </div>
+        <div class="hero-stats">
+          <div><strong>${snapshot.readyCount}</strong><span>prets</span></div>
+          <div><strong>${snapshot.downloadingCount}</strong><span>en cours</span></div>
+          <div><strong>${snapshot.scanRunning ? "Oui" : "Non"}</strong><span>scan actif</span></div>
+          <div><strong>${escapeHtml(snapshot.lastError || "Aucune")}</strong><span>derniere erreur</span></div>
+        </div>
+      </section>
+      ${getFlash(searchParams)}
+      <div class="settings-grid">
+        <section class="panel">
+          <h2>Termes de recherche</h2>
+          <form method="post" action="/settings/search-terms" class="inline-form">
+            <input type="text" name="label" placeholder="Journal de Montreal" required />
+            <button type="submit">Ajouter</button>
+          </form>
+          <div class="chip-list">
+            ${terms
+              .map(
+                (term) => `<form method="post" action="/settings/search-terms/delete" class="chip-form">
+                  <input type="hidden" name="id" value="${term.id}" />
+                  <span>${escapeHtml(term.label)}</span>
+                  <button type="submit">Supprimer</button>
+                </form>`,
+              )
+              .join("") || "<p class=\"muted\">Aucun terme.</p>"}
+          </div>
+        </section>
+        <section class="panel">
+          <h2>Flux RSS / Torznab</h2>
+          <form method="post" action="/settings/feeds" class="stack-form">
+            <label>Nom
+              <input type="text" name="name" placeholder="Prowlarr #1" required />
+            </label>
+            <label>URL
+              <input type="url" name="url" placeholder="https://..." required />
+            </label>
+            <button type="submit">Ajouter le flux</button>
+          </form>
+          <div class="feed-list">
+            ${feeds
+              .map(
+                (feed) => `<form method="post" action="/settings/feeds/delete" class="feed-item">
+                  <input type="hidden" name="id" value="${feed.id}" />
+                  <div>
+                    <strong>${escapeHtml(feed.name)}</strong>
+                    <span>${escapeHtml(feed.url)}</span>
+                  </div>
+                  <button type="submit">Supprimer</button>
+                </form>`,
+              )
+              .join("") || "<p class=\"muted\">Aucun flux.</p>"}
+          </div>
+        </section>
+      </div>
+      <section class="panel">
+        <h2>Actions</h2>
+        <div class="action-row">
+          <form method="post" action="/settings/scan">
+            <button type="submit">Lancer un scan immediat</button>
+          </form>
+          <form method="post" action="/logout">
+            <button type="submit" class="button-secondary">Se deconnecter</button>
+          </form>
+        </div>
+      </section>
+    `,
+  });
+}
+
+function renderReaderPage(journal) {
+  const pdfUrl = toManagedFileUrl(journal.pdf_relative_path);
+
+  return renderShell({
+    title: journal.display_title,
+    scripts: [PDFJS_URL, "/static/reader.js"],
+    body: `
+      <section class="reader-header">
+        <div>
+          <a class="back-link" href="/">Retour a l'accueil</a>
+          <h1>${escapeHtml(journal.display_title)}</h1>
+          <p>${escapeHtml(journal.source_title)}</p>
+        </div>
+        <div class="reader-actions">
+          <button type="button" class="mode-button is-active" data-mode="vertical">Vertical</button>
+          <button type="button" class="mode-button" data-mode="horizontal">Horizontal</button>
+          <a class="button-secondary" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noreferrer">Ouvrir le PDF</a>
+        </div>
+      </section>
+      <section id="reader-root" class="reader-root" data-pdf-url="${escapeHtml(pdfUrl)}">
+        <div class="reader-status">Chargement du journal...</div>
+        <div class="reader-pages mode-vertical"></div>
+      </section>
+    `,
+  });
+}
+
+function contentTypeFor(filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+
+  switch (extension) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".js":
+      return "application/javascript; charset=utf-8";
+    case ".pdf":
+      return "application/pdf";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".svg":
+      return "image/svg+xml";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+async function serveFile(response, filePath) {
+  try {
+    const stat = await fsp.stat(filePath);
+
+    if (!stat.isFile()) {
+      sendText(response, 404, "Not Found");
+      return;
+    }
+
+    response.writeHead(200, {
+      "content-type": contentTypeFor(filePath),
+      "content-length": stat.size,
+      "cache-control": "public, max-age=3600",
+    });
+
+    fs.createReadStream(filePath).pipe(response);
+  } catch {
+    sendText(response, 404, "Not Found");
+  }
+}
+
+function requireAdmin(request, response) {
+  if (!isConfigured()) {
+    redirect(response, "/setup");
+    return false;
+  }
+
+  if (!isAdminAuthenticated(request)) {
+    redirect(response, "/settings?type=error&message=Connexion%20requise");
+    return false;
+  }
+
+  return true;
+}
+
+async function handleGet(request, response, url) {
+  if (url.pathname === "/") {
+    sendHtml(response, 200, renderHomePage(url.searchParams));
+    return;
+  }
+
+  if (url.pathname === "/archives") {
+    sendHtml(response, 200, renderArchivesPage(url.searchParams));
+    return;
+  }
+
+  if (url.pathname === "/setup") {
+    const html = renderSetupPage(url.searchParams);
+    if (!html) {
+      redirect(response, "/settings");
+      return;
+    }
+    sendHtml(response, 200, html);
+    return;
+  }
+
+  if (url.pathname === "/settings") {
+    const html = renderSettingsPage(request, url.searchParams);
+    if (!html) {
+      redirect(response, "/setup");
+      return;
+    }
+    sendHtml(response, 200, html);
+    return;
+  }
+
+  if (url.pathname === "/events") {
+    response.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-store",
+      connection: "keep-alive",
+    });
+    response.write(`event: connected\ndata: {"ok":true}\n\n`);
+    runtime.eventClients.add(response);
+
+    const heartbeat = setInterval(() => {
+      try {
+        response.write(`event: ping\ndata: {"time":${Date.now()}}\n\n`);
+      } catch {
+        clearInterval(heartbeat);
+        runtime.eventClients.delete(response);
+      }
+    }, 25000);
+
+    request.on("close", () => {
+      clearInterval(heartbeat);
+      runtime.eventClients.delete(response);
+    });
+    return;
+  }
+
+  if (url.pathname === "/health") {
+    sendText(response, 200, "ok");
+    return;
+  }
+
+  if (url.pathname.startsWith("/static/")) {
+    const relativePath = decodeURIComponent(url.pathname.slice("/static/".length));
+    const filePath = path.resolve(PUBLIC_ROOT, relativePath);
+
+    if (filePath !== PUBLIC_ROOT && !filePath.startsWith(`${PUBLIC_ROOT}${path.sep}`)) {
+      sendText(response, 403, "Forbidden");
+      return;
+    }
+
+    await serveFile(response, filePath);
+    return;
+  }
+
+  if (url.pathname.startsWith("/files/")) {
+    const relativePath = decodeURIComponent(url.pathname.slice("/files/".length)).replace(/\\/g, "/");
+
+    try {
+      await serveFile(response, resolveManagedPath(relativePath));
+    } catch {
+      sendText(response, 404, "Not Found");
+    }
+    return;
+  }
+
+  const readerMatch = /^\/journal\/(\d+)$/.exec(url.pathname);
+  if (readerMatch) {
+    const journal = getJournalById(Number(readerMatch[1]));
+
+    if (!journal || journal.status !== "ready" || !journal.pdf_relative_path) {
+      sendText(response, 404, "Journal introuvable");
+      return;
+    }
+
+    sendHtml(response, 200, renderReaderPage(journal));
+    return;
+  }
+
+  sendText(response, 404, "Not Found");
+}
+
+async function handlePost(request, response, url) {
+  if (url.pathname === "/setup") {
+    if (isConfigured()) {
+      redirect(response, "/settings");
+      return;
+    }
+
+    const form = await readForm(request);
+
+    if (!form.password || String(form.password).length < 8) {
+      redirect(response, "/setup?type=error&message=Mot%20de%20passe%20trop%20court");
+      return;
+    }
+
+    if (form.password !== form.confirmPassword) {
+      redirect(response, "/setup?type=error&message=La%20confirmation%20ne%20correspond%20pas");
+      return;
+    }
+
+    setAdminPassword(form.password);
+    redirect(response, "/settings?type=success&message=Configuration%20terminee", {
+      "Set-Cookie": adminCookieHeader(),
+    });
+    return;
+  }
+
+  if (url.pathname === "/login") {
+    if (!isConfigured()) {
+      redirect(response, "/setup");
+      return;
+    }
+
+    const form = await readForm(request);
+    const valid = verifyPassword(String(form.password || ""), getAppConfig().adminPasswordHash);
+
+    if (!valid) {
+      redirect(response, "/settings?type=error&message=Mot%20de%20passe%20invalide");
+      return;
+    }
+
+    redirect(response, "/settings?type=success&message=Connexion%20etablie", {
+      "Set-Cookie": adminCookieHeader(),
+    });
+    return;
+  }
+
+  if (url.pathname === "/logout") {
+    redirect(response, "/settings?type=success&message=Session%20fermee", {
+      "Set-Cookie": clearAdminCookieHeader(),
+    });
+    return;
+  }
+
+  if (!requireAdmin(request, response)) {
+    return;
+  }
+
+  if (url.pathname === "/settings/search-terms") {
+    const form = await readForm(request);
+    addSearchTerm(form.label);
+    redirect(response, "/settings?type=success&message=Terme%20ajoute");
+    return;
+  }
+
+  if (url.pathname === "/settings/search-terms/delete") {
+    const form = await readForm(request);
+    removeSearchTerm(Number(form.id));
+    redirect(response, "/settings?type=success&message=Terme%20supprime");
+    return;
+  }
+
+  if (url.pathname === "/settings/feeds") {
+    const form = await readForm(request);
+    addFeed(form.name, form.url);
+    redirect(response, "/settings?type=success&message=Flux%20ajoute");
+    return;
+  }
+
+  if (url.pathname === "/settings/feeds/delete") {
+    const form = await readForm(request);
+    removeFeed(Number(form.id));
+    redirect(response, "/settings?type=success&message=Flux%20supprime");
+    return;
+  }
+
+  if (url.pathname === "/settings/scan") {
+    triggerScanNow().catch(() => {});
+    redirect(response, "/settings?type=success&message=Scan%20declenche");
+    return;
+  }
+
+  sendText(response, 404, "Not Found");
+}
+
+const server = http.createServer(async (request, response) => {
+  try {
+    ensureBootstrap();
+    const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
+
+    if (request.method === "GET" || request.method === "HEAD") {
+      await handleGet(request, response, url);
+      return;
+    }
+
+    if (request.method === "POST") {
+      await handlePost(request, response, url);
+      return;
+    }
+
+    sendText(response, 405, "Method Not Allowed");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erreur interne";
+    sendText(response, 500, message);
+  }
+});
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`${APP_NAME} en ecoute sur http://0.0.0.0:${PORT}`);
+});
