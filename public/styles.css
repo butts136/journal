@@ -28,9 +28,10 @@ body {
 body.catalog-body {
   color: #f3eee6;
   background:
-    radial-gradient(circle at top left, rgba(198, 92, 55, 0.18), transparent 22%),
-    radial-gradient(circle at top right, rgba(82, 40, 27, 0.34), transparent 28%),
-    linear-gradient(180deg, #131517 0%, #181b1f 38%, #111315 100%);
+    radial-gradient(circle at top left, rgba(208, 105, 67, 0.18), transparent 20%),
+    radial-gradient(circle at top right, rgba(70, 35, 24, 0.42), transparent 26%),
+    radial-gradient(circle at bottom, rgba(132, 66, 44, 0.1), transparent 30%),
+    linear-gradient(180deg, #0b0d10 0%, #121519 34%, #090b0e 100%);
 }
 
 body.reader-body {
@@ -106,9 +107,9 @@ code {
 }
 
 body.catalog-body .topbar {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(19, 21, 24, 0.78);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  border-color: rgba(255, 255, 255, 0.06);
+  background: rgba(13, 15, 18, 0.86);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.38);
 }
 
 .brand {
@@ -187,9 +188,9 @@ body.catalog-body .nav a.is-active {
 
 body.catalog-body .hero,
 body.catalog-body .panel {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(22, 24, 28, 0.84);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.07);
+  background: linear-gradient(180deg, rgba(17, 20, 24, 0.92), rgba(10, 12, 15, 0.94));
+  box-shadow: 0 28px 68px rgba(0, 0, 0, 0.38);
 }
 
 .hero {
@@ -249,8 +250,8 @@ body.catalog-body .eyebrow {
 }
 
 body.catalog-body .hero-stats div {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+  border-color: rgba(255, 255, 255, 0.07);
 }
 
 .hero-stats strong {
@@ -298,9 +299,9 @@ body.catalog-body .hero-stats div {
 }
 
 body.catalog-body .journal-card {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(35, 38, 43, 0.96), rgba(25, 27, 31, 0.96));
-  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.28);
+  border-color: rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(23, 26, 31, 0.98), rgba(13, 15, 18, 0.98));
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.32);
 }
 
 .journal-card:hover {
@@ -310,6 +311,36 @@ body.catalog-body .journal-card {
 
 body.catalog-body .journal-card:hover {
   box-shadow: 0 26px 48px rgba(0, 0, 0, 0.34);
+}
+
+body.catalog-body .journal-card.is-featured {
+  border-color: rgba(242, 155, 114, 0.5);
+  background:
+    linear-gradient(180deg, rgba(52, 33, 27, 0.98), rgba(18, 17, 18, 0.98)),
+    linear-gradient(135deg, rgba(187, 77, 47, 0.2), transparent 40%);
+  box-shadow:
+    0 0 0 1px rgba(242, 155, 114, 0.16),
+    0 24px 56px rgba(0, 0, 0, 0.38),
+    0 0 36px rgba(187, 77, 47, 0.12);
+}
+
+.journal-badge {
+  position: absolute;
+  left: 0.55rem;
+  top: 0.55rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.32rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(11, 13, 16, 0.78);
+  border: 1px solid rgba(242, 155, 114, 0.35);
+  color: #ffd4bf;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  backdrop-filter: blur(10px);
 }
 
 .journal-thumb {
@@ -322,7 +353,7 @@ body.catalog-body .journal-card:hover {
 }
 
 body.catalog-body .journal-thumb {
-  background: linear-gradient(180deg, #f4efe6, #c8bfb2);
+  background: linear-gradient(180deg, #1f2328, #111418);
 }
 
 .journal-thumb canvas,
@@ -430,6 +461,10 @@ body.catalog-body .flash-success,
 body.catalog-body .flash-error {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.08);
+}
+
+body.catalog-body .section-head a {
+  color: #f3b090;
 }
 
 .back-link {

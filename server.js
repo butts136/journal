@@ -660,6 +660,33 @@ function toManagedFileUrl(relativePath) {
   return `/files/${relativePath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
+function buildThumbnailRelativePath(pdfRelativePath) {
+  if (!pdfRelativePath) {
+    return null;
+  }
+
+  const parsed = path.posix.parse(pdfRelativePath);
+  return path.posix.join(parsed.dir, `${parsed.name}.thumb.webp`);
+}
+
+function getJournalThumbnailRelativePath(journal) {
+  if (!journal || !journal.pdf_relative_path) {
+    return null;
+  }
+
+  const preferredPath = journal.thumbnail_relative_path || buildThumbnailRelativePath(journal.pdf_relative_path);
+
+  if (!preferredPath) {
+    return null;
+  }
+
+  try {
+    return fs.existsSync(resolveManagedPath(preferredPath)) ? preferredPath : null;
+  } catch {
+    return null;
+  }
+}
+
 function getAttrValue(raw, key) {
   if (!raw) {
     return null;
@@ -1162,6 +1189,16 @@ async function readForm(request) {
   return Object.fromEntries(new URLSearchParams(body));
 }
 
+async function readJson(request) {
+  const body = await readRequestBody(request);
+
+  if (!body.trim()) {
+    return {};
+  }
+
+  return JSON.parse(body);
+}
+
 function isAdminAuthenticated(request) {
   if (!isConfigured()) {
     return false;
@@ -1205,6 +1242,15 @@ function sendText(response, statusCode, text, headers = {}) {
     ...headers,
   });
   response.end(text);
+}
+
+function sendJson(response, statusCode, payload, headers = {}) {
+  response.writeHead(statusCode, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    ...headers,
+  });
+  response.end(JSON.stringify(payload));
 }
 
 function redirect(response, location, headers = {}) {
@@ -1261,8 +1307,10 @@ function renderShell({ title, body, currentPath = "/", scripts = [], bodyClass =
 </html>`;
 }
 
-function renderJournalCard(journal) {
+function renderJournalCard(journal, options = {}) {
   const pdfUrl = toManagedFileUrl(journal.pdf_relative_path);
+  const thumbRelativePath = getJournalThumbnailRelativePath(journal);
+  const thumbUrl = toManagedFileUrl(thumbRelativePath);
   const date = parseDateKey(journal.publication_date);
   const meta = [
     date ? formatFrenchDate(date) : journal.publication_date,
@@ -1270,11 +1318,17 @@ function renderJournalCard(journal) {
   ]
     .filter(Boolean)
     .join(" · ");
+  const classes = ["journal-card"];
 
-  return `<a class="journal-card" href="/journal/${journal.id}" data-pdf-url="${escapeHtml(
+  if (options.featured) {
+    classes.push("is-featured");
+  }
+
+  return `<a class="${classes.join(" ")}" href="/journal/${journal.id}" data-journal-id="${journal.id}" data-pdf-url="${escapeHtml(
     pdfUrl || "",
-  )}">
+  )}" data-thumb-url="${escapeHtml(thumbUrl || "")}">
     <div class="journal-thumb">
+      ${options.featured ? '<span class="journal-badge">Plus recent</span>' : ""}
       <canvas aria-hidden="true"></canvas>
       <div class="journal-thumb-fallback">PDF</div>
     </div>
@@ -1293,7 +1347,9 @@ function renderJournalGrid(journals) {
     </div>`;
   }
 
-  return `<div class="journal-grid">${journals.map(renderJournalCard).join("")}</div>`;
+  return `<div class="journal-grid">${journals
+    .map((journal, index) => renderJournalCard(journal, { featured: index === 0 }))
+    .join("")}</div>`;
 }
 
 function renderHomePage(searchParams) {
@@ -1601,6 +1657,8 @@ function contentTypeFor(filePath) {
     case ".jpg":
     case ".jpeg":
       return "image/jpeg";
+    case ".webp":
+      return "image/webp";
     case ".svg":
       return "image/svg+xml";
     default:
@@ -1776,6 +1834,45 @@ async function handleGet(request, response, url) {
 }
 
 async function handlePost(request, response, url) {
+  if (url.pathname === "/api/thumbnail") {
+    const payload = await readJson(request);
+    const journalId = Number(payload.journalId);
+    const imageDataUrl = String(payload.imageDataUrl || "");
+
+    if (!Number.isInteger(journalId) || journalId <= 0 || !imageDataUrl.startsWith("data:image/")) {
+      sendJson(response, 400, { ok: false, error: "Requete miniature invalide." });
+      return;
+    }
+
+    const match = imageDataUrl.match(/^data:(image\/(?:webp|png|jpeg));base64,(.+)$/);
+    if (!match) {
+      sendJson(response, 400, { ok: false, error: "Format miniature non supporte." });
+      return;
+    }
+
+    const journal = getJournalById(journalId);
+    if (!journal || !journal.pdf_relative_path) {
+      sendJson(response, 404, { ok: false, error: "Journal introuvable." });
+      return;
+    }
+
+    const thumbnailRelativePath = buildThumbnailRelativePath(journal.pdf_relative_path);
+    const thumbnailAbsolutePath = resolveManagedPath(thumbnailRelativePath);
+
+    ensureDir(path.dirname(thumbnailAbsolutePath));
+    await fsp.writeFile(thumbnailAbsolutePath, Buffer.from(match[2], "base64"));
+
+    updateJournalStatus(journal.id, journal.status, {
+      thumbnailRelativePath,
+    });
+
+    sendJson(response, 200, {
+      ok: true,
+      thumbnailUrl: toManagedFileUrl(thumbnailRelativePath),
+    });
+    return;
+  }
+
   if (url.pathname === "/setup") {
     if (isConfigured()) {
       redirect(response, "/settings");

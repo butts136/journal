@@ -65,10 +65,50 @@
     card.dataset.thumbReady = "1";
   }
 
+  async function persistThumb(card, dataUrl) {
+    const journalId = Number(card.dataset.journalId);
+
+    if (!journalId || !dataUrl || card.dataset.thumbSaved === "1") {
+      return;
+    }
+
+    card.dataset.thumbSaved = "1";
+
+    try {
+      const response = await fetch("/api/thumbnail", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          journalId,
+          imageDataUrl: dataUrl,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("thumbnail-persist-failed");
+      }
+
+      const payload = await response.json();
+      if (payload && payload.thumbnailUrl) {
+        card.dataset.thumbUrl = payload.thumbnailUrl;
+      }
+    } catch {
+      card.dataset.thumbSaved = "0";
+    }
+  }
+
   async function renderCard(card) {
     const pdfUrl = card.dataset.pdfUrl;
+    const thumbUrl = card.dataset.thumbUrl;
     const canvas = card.querySelector("canvas");
     const fallback = card.querySelector(".journal-thumb-fallback");
+
+    if (thumbUrl) {
+      paintThumbImage(card, thumbUrl);
+      return;
+    }
 
     if (!pdfUrl || !canvas || !window.pdfjsLib) {
       return;
@@ -77,6 +117,7 @@
     const cachedThumb = readCachedThumb(pdfUrl);
     if (cachedThumb) {
       paintThumbImage(card, cachedThumb);
+      persistThumb(card, cachedThumb);
       return;
     }
 
@@ -99,6 +140,7 @@
       const dataUrl = canvas.toDataURL("image/webp", 0.82);
       writeCachedThumb(pdfUrl, dataUrl);
       paintThumbImage(card, dataUrl);
+      persistThumb(card, dataUrl);
     } catch {
       if (fallback) {
         fallback.textContent = "Miniature indisponible";
