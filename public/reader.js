@@ -8,13 +8,26 @@
 
   const pdfUrl = root.dataset.pdfUrl;
   const pagesNode = root.querySelector(".reader-pages");
+  const nativeFrame = root.querySelector(".reader-native-frame");
   const buttons = Array.from(document.querySelectorAll(".mode-button"));
   let currentMode = "vertical";
   let pdfDocument = null;
   let renderVersion = 0;
+  let firstPageRendered = false;
 
   function setStatus(text) {
     statusNode.textContent = text;
+  }
+
+  function enableCustomReader() {
+    firstPageRendered = true;
+    root.classList.add("is-custom-ready");
+  }
+
+  function showNativeFallback(message) {
+    root.classList.remove("is-custom-ready");
+    pagesNode.innerHTML = "";
+    setStatus(message || "Affichage PDF natif");
   }
 
   function setMode(mode) {
@@ -76,11 +89,16 @@
       canvasContext: context,
       viewport,
     }).promise;
+
+    if (!firstPageRendered) {
+      enableCustomReader();
+    }
   }
 
   async function renderDocument(pdf) {
     const version = ++renderVersion;
     pagesNode.innerHTML = "";
+    firstPageRendered = false;
     setStatus(`Chargement des pages... 0 / ${pdf.numPages}`);
 
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
@@ -100,20 +118,6 @@
     setStatus(`${pdf.numPages} pages`);
   }
 
-  function showFallback(message) {
-    setStatus(message);
-    pagesNode.innerHTML = "";
-
-    const fallback = document.createElement("div");
-    fallback.className = "reader-fallback";
-    fallback.innerHTML = `
-      <strong>Le rendu personnalise n'a pas pu s'ouvrir.</strong>
-      <p>${message}</p>
-      <a class="button-secondary compact-button" href="${pdfUrl}" target="_blank" rel="noreferrer">Ouvrir le PDF</a>
-    `;
-    pagesNode.appendChild(fallback);
-  }
-
   buttons.forEach((button) => {
     button.addEventListener("click", () => {
       setMode(button.dataset.mode);
@@ -128,25 +132,31 @@
 
     window.clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(() => {
-      renderDocument(pdfDocument).catch((error) => {
-        showFallback(error instanceof Error ? error.message : "Impossible de recharger le PDF.");
+      renderDocument(pdfDocument).catch(() => {
+        showNativeFallback("Lecteur natif actif");
       });
     }, 120);
   });
 
   async function boot() {
     if (!window.pdfjsLib) {
-      showFallback("pdf.js n'est pas disponible dans ce navigateur.");
+      showNativeFallback("Lecteur natif actif");
       return;
     }
 
     if (!pdfUrl) {
-      showFallback("Le chemin du PDF est manquant.");
+      showNativeFallback("Chemin PDF manquant");
       return;
     }
 
     window.pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+    const nativeTimer = window.setTimeout(() => {
+      if (!firstPageRendered) {
+        showNativeFallback("Lecteur natif actif");
+      }
+    }, 2200);
 
     try {
       setStatus("Ouverture du PDF...");
@@ -160,9 +170,19 @@
 
       setStatus(`${pdfDocument.numPages} pages`);
       await renderDocument(pdfDocument);
-    } catch (error) {
-      showFallback(error instanceof Error ? error.message : "Impossible de charger le PDF.");
+      window.clearTimeout(nativeTimer);
+    } catch {
+      window.clearTimeout(nativeTimer);
+      showNativeFallback("Lecteur natif actif");
     }
+  }
+
+  if (nativeFrame) {
+    nativeFrame.addEventListener("load", () => {
+      if (!firstPageRendered) {
+        setStatus("Lecteur natif actif");
+      }
+    });
   }
 
   setMode("vertical");

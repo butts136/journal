@@ -1566,11 +1566,14 @@ function renderReaderPage(journal) {
         </div>
       </header>
       <main id="reader-root" class="reader-stage" data-pdf-url="${escapeHtml(pdfUrl)}">
+        <iframe class="reader-native-frame" src="${escapeHtml(pdfUrl)}#view=FitH" title="${escapeHtml(
+          journal.display_title,
+        )}"></iframe>
         <div class="reader-pages mode-vertical"></div>
       </main>
     </div>
     <script src="${PDFJS_URL}"></script>
-    <script src="/static/reader.js"></script>
+    <script src="/static/reader.js?v=2"></script>
   </body>
 </html>`;
 }
