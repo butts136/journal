@@ -1611,14 +1611,14 @@ function renderReaderPage(journal) {
             </button>
             <div class="reader-zoom-panel" id="zoom-panel" hidden>
               <button type="button" class="reader-zoom-step" id="zoom-decrease-button" aria-label="Reduire le zoom">-</button>
-              <input id="zoom-range" class="reader-zoom-range" type="range" min="100" max="250" step="5" value="100" />
+              <input id="zoom-range" class="reader-zoom-range" type="range" min="35" max="250" step="5" value="100" />
               <button type="button" class="reader-zoom-step" id="zoom-increase-button" aria-label="Augmenter le zoom">+</button>
               <span id="zoom-value" class="reader-zoom-value">100%</span>
             </div>
           </div>
           <button type="button" class="reader-icon-button" id="fullscreen-toggle-button" aria-label="Plein ecran" title="Plein ecran">
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 9V4h5v2H6v3H4Zm10-5h6v6h-2V6h-4V4ZM4 15h2v3h3v2H4v-5Zm14 3v-3h2v5h-5v-2h3Z" fill="currentColor"/>
+              <path d="M4 10V4h6v2H6v4H4Zm10-6h6v6h-2V6h-4V4ZM6 16h4v2H4v-6h2v4Zm12-4h2v6h-6v-2h4v-4Z" fill="currentColor"/>
             </svg>
           </button>
         </div>
@@ -1626,13 +1626,13 @@ function renderReaderPage(journal) {
       <main id="reader-root" class="reader-stage" data-pdf-url="${escapeHtml(pdfUrl)}">
         <div class="reader-viewport" id="reader-viewport">
           <div class="reader-pan-stage" id="reader-pan-stage">
-            <div class="reader-pages mode-vertical"></div>
+            <div class="reader-pages mode-spread"></div>
           </div>
         </div>
       </main>
     </div>
     <script src="${PDFJS_URL}"></script>
-    <script src="/static/reader.js?v=7"></script>
+    <script src="/static/reader.js?v=8"></script>
   </body>
 </html>`;
 }

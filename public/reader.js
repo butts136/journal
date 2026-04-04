@@ -25,7 +25,7 @@
     { key: "vertical", label: "Vertical" },
     { key: "horizontal", label: "Horizontal" },
   ];
-  const MIN_ZOOM = 1;
+  const MIN_ZOOM = 0.35;
   const MAX_ZOOM = 2.5;
   const QUALITY_SCALE = Math.max(window.devicePixelRatio || 1, 2);
 
@@ -89,19 +89,13 @@
     const content = getContentSize();
     const scaledWidth = content.width * zoom;
     const scaledHeight = content.height * zoom;
+    const visibleWidth = Math.max(40, Math.min(96, scaledWidth * 0.2));
+    const visibleHeight = Math.max(40, Math.min(96, scaledHeight * 0.2));
 
-    let minX = viewportWidth - scaledWidth;
-    let maxX = 0;
-    let minY = viewportHeight - scaledHeight;
-    let maxY = 0;
-
-    if (scaledWidth <= viewportWidth) {
-      minX = maxX = (viewportWidth - scaledWidth) / 2;
-    }
-
-    if (scaledHeight <= viewportHeight) {
-      minY = maxY = (viewportHeight - scaledHeight) / 2;
-    }
+    const minX = -scaledWidth + visibleWidth;
+    const maxX = viewportWidth - visibleWidth;
+    const minY = -scaledHeight + visibleHeight;
+    const maxY = viewportHeight - visibleHeight;
 
     return {
       x: Math.min(maxX, Math.max(minX, nextX)),
@@ -134,10 +128,6 @@
     }
 
     if (currentMode === "spread") {
-      if (pageNumber === 1) {
-        return viewportWidth / baseViewport.width;
-      }
-
       return (viewportWidth / 2) / baseViewport.width;
     }
 
@@ -265,8 +255,10 @@
     applyLayout();
 
     if (recenter) {
-      offsetX = 0;
-      offsetY = 0;
+      const contentWidth = pagesNode.offsetWidth;
+      const contentHeight = pagesNode.offsetHeight;
+      offsetX = Math.max(0, (viewportNode.clientWidth - contentWidth * zoom) / 2);
+      offsetY = Math.max(0, (viewportNode.clientHeight - contentHeight * zoom) / 2);
     } else if (preserveOffsets) {
       offsetX = savedOffsetX;
       offsetY = savedOffsetY;
