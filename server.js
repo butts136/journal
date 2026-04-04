@@ -1354,7 +1354,6 @@ function renderJournalGrid(journals) {
 
 function renderHomePage(searchParams) {
   const journals = getRecentJournals();
-  const snapshot = getStatusSnapshot();
 
   return renderShell({
     title: "Accueil",
@@ -1362,19 +1361,6 @@ function renderHomePage(searchParams) {
     bodyClass: "catalog-body",
     scripts: [PDFJS_URL, "/static/app.js"],
     body: `
-      <section class="hero">
-        <div>
-          <span class="eyebrow">Flux en direct</span>
-          <h1>Les 30 journaux les plus recents, sans rafraichir la page.</h1>
-          <p>L'accueil se met a jour via SSE des qu'un nouveau PDF est telecharge.</p>
-        </div>
-        <div class="hero-stats">
-          <div><strong>${snapshot.readyCount}</strong><span>PDF prets</span></div>
-          <div><strong>${snapshot.downloadingCount}</strong><span>telechargements</span></div>
-          <div><strong>${snapshot.feedCount}</strong><span>flux RSS</span></div>
-          <div><strong>${snapshot.termCount}</strong><span>termes actifs</span></div>
-        </div>
-      </section>
       ${getFlash(searchParams)}
       <section class="section-head">
         <h2>Dernieres editions</h2>
