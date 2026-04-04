@@ -334,7 +334,11 @@
   }
 
   if (modeCycleButton) {
-    modeCycleButton.addEventListener("click", cycleMode);
+    modeCycleButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      cycleMode();
+    });
   }
 
   if (zoomToggleButton) {

@@ -1620,11 +1620,6 @@ function renderReaderPage(journal) {
               <path d="M4 9V4h5v2H6v3H4Zm10-5h6v6h-2V6h-4V4ZM4 15h2v3h3v2H4v-5Zm14 3v-3h2v5h-5v-2h3Z" fill="currentColor"/>
             </svg>
           </button>
-          <a class="reader-icon-button" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noreferrer" aria-label="Telecharger" title="Telecharger">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M11 4h2v8.17l2.59-2.58L17 11l-5 5-5-5 1.41-1.41L11 12.17V4Zm-5 14h12v2H6v-2Z" fill="currentColor"/>
-            </svg>
-          </a>
         </div>
       </header>
       <main id="reader-root" class="reader-stage" data-pdf-url="${escapeHtml(pdfUrl)}">
@@ -1636,7 +1631,7 @@ function renderReaderPage(journal) {
       </main>
     </div>
     <script src="${PDFJS_URL}"></script>
-    <script src="/static/reader.js?v=5"></script>
+    <script src="/static/reader.js?v=6"></script>
   </body>
 </html>`;
 }
