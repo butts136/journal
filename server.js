@@ -1,5 +1,6 @@
 const http = require("node:http");
 const https = require("node:https");
+const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
@@ -34,7 +35,6 @@ const runtime = {
     lastSuccessAt: null,
     lastError: null,
   },
-  torrentClientPromise: null,
 };
 
 const parser = new XMLParser({
@@ -778,77 +778,167 @@ function parseJournalCandidate(item, searchTerms) {
   };
 }
 
-async function getTorrentClient() {
-  if (!runtime.torrentClientPromise) {
-    runtime.torrentClientPromise = import("webtorrent").then((module) => {
-      const WebTorrent = module.default;
-      return new WebTorrent();
+function getCommandProbe() {
+  return process.platform === "win32"
+    ? { command: "where", args: [] }
+    : { command: "which", args: [] };
+}
+
+function commandExists(commandName) {
+  const probe = getCommandProbe();
+
+  return new Promise((resolve) => {
+    const child = spawn(probe.command, [...probe.args, commandName], {
+      stdio: "ignore",
     });
+
+    child.on("error", () => resolve(false));
+    child.on("close", (code) => resolve(code === 0));
+  });
+}
+
+function runExternalCommand(command, args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+
+      reject(
+        new Error(
+          stderr.trim() ||
+            stdout.trim() ||
+            `La commande externe ${command} a echoue (code ${code}).`,
+        ),
+      );
+    });
+  });
+}
+
+async function findLargestPdf(dirPath) {
+  const stack = [dirPath];
+  let bestMatch = null;
+
+  while (stack.length) {
+    const currentDir = stack.pop();
+    const entries = await fsp.readdir(currentDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+
+      if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".pdf")) {
+        continue;
+      }
+
+      const stat = await fsp.stat(fullPath);
+      if (!bestMatch || stat.size > bestMatch.size) {
+        bestMatch = {
+          path: fullPath,
+          size: stat.size,
+          name: entry.name,
+        };
+      }
+    }
   }
 
-  return runtime.torrentClientPromise;
+  return bestMatch;
+}
+
+async function downloadWithTransmissionCli(sourceUrl, outputPath) {
+  const workDir = await fsp.mkdtemp(path.join(path.dirname(outputPath), "torrent-"));
+
+  try {
+    await runExternalCommand(
+      "transmission-cli",
+      ["-w", workDir, "-er", sourceUrl],
+      workDir,
+    );
+
+    const pdf = await findLargestPdf(workDir);
+    if (!pdf) {
+      throw new Error("Aucun fichier PDF n'a ete trouve dans le torrent.");
+    }
+
+    await fsp.copyFile(pdf.path, outputPath);
+    return {
+      bytes: pdf.size,
+      fileName: pdf.name,
+    };
+  } finally {
+    await fsp.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function downloadWithAria2(sourceUrl, outputPath) {
+  const workDir = await fsp.mkdtemp(path.join(path.dirname(outputPath), "torrent-"));
+
+  try {
+    await runExternalCommand(
+      "aria2c",
+      [
+        "--dir",
+        workDir,
+        "--seed-time=0",
+        "--follow-torrent=true",
+        "--bt-save-metadata=false",
+        "--auto-file-renaming=false",
+        sourceUrl,
+      ],
+      workDir,
+    );
+
+    const pdf = await findLargestPdf(workDir);
+    if (!pdf) {
+      throw new Error("Aucun fichier PDF n'a ete trouve dans le torrent.");
+    }
+
+    await fsp.copyFile(pdf.path, outputPath);
+    return {
+      bytes: pdf.size,
+      fileName: pdf.name,
+    };
+  } finally {
+    await fsp.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 async function downloadLargestPdfFromTorrent(sourceUrl, outputPath) {
-  const client = await getTorrentClient();
   ensureDir(path.dirname(outputPath));
 
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let currentInfoHash = "";
+  if (await commandExists("transmission-cli")) {
+    return downloadWithTransmissionCli(sourceUrl, outputPath);
+  }
 
-    const fail = (error) => {
-      if (settled) {
-        return;
-      }
+  if (await commandExists("aria2c")) {
+    return downloadWithAria2(sourceUrl, outputPath);
+  }
 
-      settled = true;
-
-      if (currentInfoHash) {
-        client.remove(currentInfoHash, () => reject(error));
-        return;
-      }
-
-      reject(error);
-    };
-
-    client.add(sourceUrl, { destroyStoreOnDestroy: true }, (torrent) => {
-      currentInfoHash = torrent.infoHash;
-      torrent.on("error", fail);
-
-      const selectedPdf = torrent.files
-        .filter((file) => file.name.toLowerCase().endsWith(".pdf"))
-        .sort((left, right) => right.length - left.length)[0];
-
-      if (!selectedPdf) {
-        fail(new Error("Aucun fichier PDF n'a ete trouve dans ce torrent."));
-        return;
-      }
-
-      selectedPdf.select();
-      const readStream = selectedPdf.createReadStream();
-      const writeStream = fs.createWriteStream(outputPath);
-
-      readStream.on("error", fail);
-      writeStream.on("error", fail);
-      writeStream.on("finish", () => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        const bytes = fs.statSync(outputPath).size;
-        client.remove(torrent.infoHash, () => {
-          resolve({
-            bytes,
-            fileName: selectedPdf.name,
-          });
-        });
-      });
-
-      readStream.pipe(writeStream);
-    });
-  });
+  throw new Error(
+    "Aucun client torrent systeme disponible. Installe transmission-cli ou aria2c.",
+  );
 }
 
 function broadcastEvent(type, payload) {
