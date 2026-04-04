@@ -1,19 +1,10 @@
 {
   "name": "journal-web",
-  "version": "0.2.0",
-  "description": "Lecteur web de journaux PDF avec surveillance RSS et ingestion torrent, version légère sans build frontend.",
+  "version": "0.3.0",
+  "description": "Lecteur web de journaux PDF avec backend Python léger sans build frontend.",
   "private": true,
-  "engines": {
-    "node": ">=20"
-  },
   "scripts": {
-    "dev": "node server.js",
-    "start": "node server.js",
-    "check": "node --check server.js && node --check public/app.js && node --check public/reader.js"
-  },
-  "dependencies": {
-    "better-sqlite3": "^12.8.0",
-    "fast-xml-parser": "^5.5.10",
-    "webtorrent": "^2.8.5"
+    "start": "python app.py",
+    "check": "python -m py_compile app.py"
   }
 }

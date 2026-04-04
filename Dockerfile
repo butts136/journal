@@ -1,14 +1,12 @@
-FROM node:22-bookworm-slim
+FROM python:3.12-slim
 
 WORKDIR /app
-ENV NODE_ENV=production
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 ENV PORT=3000
-
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
 
 COPY . .
 RUN mkdir -p /app/data /app/storage
 
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["python", "app.py"]

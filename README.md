@@ -1,26 +1,26 @@
 # Le Kiosque Lite
 
-Lecteur web de journaux PDF en stack legere, sans build frontend.
+Lecteur web de journaux PDF en stack legere, sans build frontend et avec backend Python stdlib.
 
 ## Stack
 
-- `Node.js 20+`
-- `better-sqlite3`
-- `fast-xml-parser`
-- `webtorrent`
+- `Python 3.10+`
+- `sqlite3` standard library
+- `http.server` standard library
+- `xml.etree.ElementTree` pour le RSS
 - HTML rendu cote serveur
-- JavaScript navigateur minimal pour SSE et rendu PDF
+- JavaScript navigateur minimal pour SSE, miniatures et lecteur PDF
 
 ## Pourquoi cette version
 
-Cette version remplace `Next.js` et `React` par un seul serveur `node server.js`.
+Cette version remplace le backend Node par un seul serveur `python app.py`.
 
 Objectif :
 
 - demarrage simple sur Linux
 - pas d'etape `build`
+- pas de dependances Python externes
 - consommation memoire beaucoup plus basse
-- installation via `npm install`
 
 ## Fonctionnalites
 
@@ -42,13 +42,6 @@ Objectif :
 
 ```bash
 cp .env.example .env.local
-npm install
-npm start
-```
-
-Ou, avec le lanceur simple :
-
-```bash
 python3 /chemin/vers/app.py
 ```
 
@@ -96,5 +89,6 @@ docker compose up --build
 
 - Le rendu des miniatures et du lecteur PDF repose sur `pdf.js` charge cote navigateur.
 - Les PDF sont servis depuis `storage/` via la route `/files/...`.
-- Le scan RSS tourne dans le meme process Node que l'application web.
+- Le scan RSS tourne dans le meme process Python que l'application web.
+- Le telechargement torrent utilise `transmission-cli` ou `aria2c` s'ils sont installes sur l'hote.
 - Cette pile est concue pour les petits serveurs ou les environnements SSH limites.
