@@ -1597,7 +1597,7 @@ function contentTypeFor(filePath) {
   }
 }
 
-async function serveFile(response, filePath) {
+async function serveFile(request, response, filePath) {
   try {
     const stat = await fsp.stat(filePath);
 
@@ -1606,10 +1606,41 @@ async function serveFile(response, filePath) {
       return;
     }
 
+    const rangeHeader = request && request.headers ? request.headers.range : null;
+
+    if (rangeHeader) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
+
+      if (match) {
+        const start = match[1] ? Number(match[1]) : 0;
+        const end = match[2] ? Number(match[2]) : stat.size - 1;
+
+        if (
+          Number.isFinite(start) &&
+          Number.isFinite(end) &&
+          start >= 0 &&
+          end >= start &&
+          end < stat.size
+        ) {
+          response.writeHead(206, {
+            "content-type": contentTypeFor(filePath),
+            "content-length": end - start + 1,
+            "cache-control": "public, max-age=3600",
+            "accept-ranges": "bytes",
+            "content-range": `bytes ${start}-${end}/${stat.size}`,
+          });
+
+          fs.createReadStream(filePath, { start, end }).pipe(response);
+          return;
+        }
+      }
+    }
+
     response.writeHead(200, {
       "content-type": contentTypeFor(filePath),
       "content-length": stat.size,
       "cache-control": "public, max-age=3600",
+      "accept-ranges": "bytes",
     });
 
     fs.createReadStream(filePath).pipe(response);
@@ -1702,7 +1733,7 @@ async function handleGet(request, response, url) {
       return;
     }
 
-    await serveFile(response, filePath);
+    await serveFile(request, response, filePath);
     return;
   }
 
@@ -1710,7 +1741,7 @@ async function handleGet(request, response, url) {
     const relativePath = decodeURIComponent(url.pathname.slice("/files/".length)).replace(/\\/g, "/");
 
     try {
-      await serveFile(response, resolveManagedPath(relativePath));
+      await serveFile(request, response, resolveManagedPath(relativePath));
     } catch {
       sendText(response, 404, "Not Found");
     }

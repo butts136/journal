@@ -27,7 +27,7 @@ body {
 
 body.reader-body {
   overflow: hidden;
-  background: #f2ebdf;
+  background: #111315;
 }
 
 a {
@@ -370,6 +370,16 @@ h3 {
   white-space: nowrap;
 }
 
+.reader-toolbar .back-link {
+  color: #f29b72;
+}
+
+.reader-toolbar .button-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f2ede6;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
 .reader-screen {
   height: 100vh;
   display: grid;
@@ -383,9 +393,10 @@ h3 {
   gap: 1rem;
   min-height: var(--toolbar-height);
   padding: 0.55rem 1rem;
-  background: rgba(255, 250, 242, 0.9);
-  border-bottom: 1px solid rgba(73, 51, 32, 0.12);
+  background: rgba(18, 20, 23, 0.92);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(14px);
+  color: #f2ede6;
 }
 
 .reader-toolbar-main,
@@ -406,7 +417,7 @@ h3 {
 
 .reader-meta,
 #reader-status {
-  color: var(--muted);
+  color: rgba(242, 237, 230, 0.66);
   font-size: 0.85rem;
   white-space: nowrap;
 }
@@ -414,7 +425,9 @@ h3 {
 .reader-stage {
   min-height: 0;
   overflow: auto;
-  background: #f1ebdf;
+  background:
+    radial-gradient(circle at top, rgba(54, 57, 63, 0.5), transparent 24%),
+    #111315;
 }
 
 .reader-pages {
@@ -447,12 +460,26 @@ h3 {
   box-shadow: none;
 }
 
+.reader-fallback {
+  width: min(720px, calc(100% - 2rem));
+  margin: 2rem auto;
+  padding: 1.2rem;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #f2ede6;
+}
+
+.reader-fallback p {
+  color: rgba(242, 237, 230, 0.72);
+}
+
 .mode-button {
   padding: 0.55rem 0.9rem;
   box-shadow: none;
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--text);
-  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2ede6;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .mode-button.is-active {

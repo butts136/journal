@@ -1,22 +1,21 @@
 (function () {
-  if (!window.pdfjsLib) {
-    return;
-  }
-
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-
   const root = document.getElementById("reader-root");
-  if (!root) {
+  const statusNode = document.getElementById("reader-status");
+
+  if (!root || !statusNode) {
     return;
   }
 
   const pdfUrl = root.dataset.pdfUrl;
-  const statusNode = document.getElementById("reader-status");
   const pagesNode = root.querySelector(".reader-pages");
   const buttons = Array.from(document.querySelectorAll(".mode-button"));
   let currentMode = "vertical";
   let pdfDocument = null;
+  let renderVersion = 0;
+
+  function setStatus(text) {
+    statusNode.textContent = text;
+  }
 
   function setMode(mode) {
     currentMode = mode === "horizontal" ? "horizontal" : "vertical";
@@ -28,47 +27,91 @@
     });
 
     if (pdfDocument) {
-      renderPages(pdfDocument);
+      renderDocument(pdfDocument);
     }
   }
 
   function getScale(page) {
-    const viewport = page.getViewport({ scale: 1 });
+    const baseViewport = page.getViewport({ scale: 1 });
     const toolbarHeight = 58;
 
     if (currentMode === "horizontal") {
-      const targetHeight = Math.max(window.innerHeight - toolbarHeight - 6, 320);
-      return targetHeight / viewport.height;
+      const targetHeight = Math.max(window.innerHeight - toolbarHeight - 10, 280);
+      return targetHeight / baseViewport.height;
     }
 
-    const targetWidth = Math.max(root.clientWidth, 320);
-    return targetWidth / viewport.width;
+    const targetWidth = Math.min(Math.max(root.clientWidth, 320), 1180);
+    return targetWidth / baseViewport.width;
   }
 
-  async function renderPages(pdf) {
+  async function renderPage(pdf, pageNumber, version) {
+    if (version !== renderVersion) {
+      return;
+    }
+
+    const page = await pdf.getPage(pageNumber);
+
+    if (version !== renderVersion) {
+      return;
+    }
+
+    const viewport = page.getViewport({ scale: getScale(page) });
+    const wrapper = document.createElement("div");
+    wrapper.className = "reader-sheet";
+
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Canvas 2D indisponible.");
+    }
+
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+
+    wrapper.appendChild(canvas);
+    pagesNode.appendChild(wrapper);
+
+    await page.render({
+      canvasContext: context,
+      viewport,
+    }).promise;
+  }
+
+  async function renderDocument(pdf) {
+    const version = ++renderVersion;
+    pagesNode.innerHTML = "";
+    setStatus(`Chargement des pages... 0 / ${pdf.numPages}`);
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      await renderPage(pdf, pageNumber, version);
+
+      if (version !== renderVersion) {
+        return;
+      }
+
+      setStatus(`${pdf.numPages} pages · ${pageNumber}/${pdf.numPages}`);
+
+      if (pageNumber < pdf.numPages) {
+        await new Promise((resolve) => window.requestAnimationFrame(resolve));
+      }
+    }
+
+    setStatus(`${pdf.numPages} pages`);
+  }
+
+  function showFallback(message) {
+    setStatus(message);
     pagesNode.innerHTML = "";
 
-    for (let index = 1; index <= pdf.numPages; index += 1) {
-      const page = await pdf.getPage(index);
-      const scale = getScale(page);
-      const viewport = page.getViewport({ scale });
-
-      const wrapper = document.createElement("div");
-      wrapper.className = "reader-sheet";
-
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-
-      await page.render({
-        canvasContext: context,
-        viewport,
-      }).promise;
-
-      wrapper.appendChild(canvas);
-      pagesNode.appendChild(wrapper);
-    }
+    const fallback = document.createElement("div");
+    fallback.className = "reader-fallback";
+    fallback.innerHTML = `
+      <strong>Le rendu personnalise n'a pas pu s'ouvrir.</strong>
+      <p>${message}</p>
+      <a class="button-secondary compact-button" href="${pdfUrl}" target="_blank" rel="noreferrer">Ouvrir le PDF</a>
+    `;
+    pagesNode.appendChild(fallback);
   }
 
   buttons.forEach((button) => {
@@ -85,21 +128,43 @@
 
     window.clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(() => {
-      renderPages(pdfDocument);
+      renderDocument(pdfDocument).catch((error) => {
+        showFallback(error instanceof Error ? error.message : "Impossible de recharger le PDF.");
+      });
     }, 120);
   });
 
-  async function render() {
+  async function boot() {
+    if (!window.pdfjsLib) {
+      showFallback("pdf.js n'est pas disponible dans ce navigateur.");
+      return;
+    }
+
+    if (!pdfUrl) {
+      showFallback("Le chemin du PDF est manquant.");
+      return;
+    }
+
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
     try {
-      pdfDocument = await window.pdfjsLib.getDocument(pdfUrl).promise;
-      statusNode.textContent = `${pdfDocument.numPages} pages`;
-      await renderPages(pdfDocument);
+      setStatus("Ouverture du PDF...");
+      pdfDocument = await window.pdfjsLib.getDocument({
+        url: pdfUrl,
+        rangeChunkSize: 262144,
+        disableAutoFetch: false,
+        disableStream: false,
+        useSystemFonts: true,
+      }).promise;
+
+      setStatus(`${pdfDocument.numPages} pages`);
+      await renderDocument(pdfDocument);
     } catch (error) {
-      statusNode.textContent =
-        error instanceof Error ? error.message : "Impossible de charger le PDF.";
+      showFallback(error instanceof Error ? error.message : "Impossible de charger le PDF.");
     }
   }
 
   setMode("vertical");
-  render();
+  boot();
 })();
