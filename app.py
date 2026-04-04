@@ -1040,7 +1040,7 @@ def render_journal_card(journal: dict, base_path: str = "", featured: bool = Fal
     pdf_url = to_managed_file_url(journal.get("pdf_relative_path"), base_path)
     thumb_url = to_managed_file_url(get_journal_thumbnail_relative_path(journal), base_path)
     journal_id = journal.get("id")
-    journal_href = with_base_path(base_path, f"/journal/{journal_id}")
+    journal_href = with_base_path(base_path, f"/reader/{journal_id}")
     display_title = str(journal.get("display_title") or "")
     journal_date = parse_date_key(journal.get("publication_date"))
     meta_parts = []
@@ -1459,7 +1459,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_text(404, "Not Found", head_only=head_only)
             return
 
-        reader_match = re.match(r"^/journal/(\d+)$", path_name)
+        reader_match = re.match(r"^/(?:reader|journal)/(\d+)$", path_name) or re.match(r"^/(\d+)$", path_name)
         if reader_match:
             journal = get_journal_by_id(int(reader_match.group(1)))
             if not journal or journal.get("status") != "ready" or not journal.get("pdf_relative_path"):
