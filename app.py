@@ -1616,9 +1616,14 @@ class AppHandler(BaseHTTPRequestHandler):
         self.handle_request(head_only=False)
 
 
+class AppServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 def main() -> int:
     ensure_bootstrap()
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), AppHandler)
+    server = AppServer(("0.0.0.0", PORT), AppHandler)
 
     def shutdown_handler(signum: int, frame: object) -> None:
         server.shutdown()
