@@ -1605,13 +1605,14 @@ function renderReaderPage(journal) {
           <span class="reader-status" id="reader-status">Chargement...</span>
           <button type="button" class="reader-control-button" id="mode-cycle-button">2 pages</button>
           <div class="reader-zoom-control" id="zoom-control">
-            <button type="button" class="reader-icon-button" id="zoom-toggle-button" aria-label="Zoom" title="Zoom">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M10.5 4a6.5 6.5 0 1 0 4.06 11.58l4.43 4.43 1.41-1.41-4.43-4.43A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm-.75 1.75v2h-2v1.5h2v2h1.5v-2h2v-1.5h-2v-2h-1.5Z" fill="currentColor"/>
-              </svg>
+            <button type="button" class="reader-control-button reader-zoom-toggle" id="zoom-toggle-button" aria-label="Zoom" title="Zoom">
+              <span>Zoom</span>
+              <strong id="zoom-button-value">100%</strong>
             </button>
             <div class="reader-zoom-panel" id="zoom-panel" hidden>
+              <button type="button" class="reader-zoom-step" id="zoom-decrease-button" aria-label="Reduire le zoom">-</button>
               <input id="zoom-range" class="reader-zoom-range" type="range" min="100" max="250" step="5" value="100" />
+              <button type="button" class="reader-zoom-step" id="zoom-increase-button" aria-label="Augmenter le zoom">+</button>
               <span id="zoom-value" class="reader-zoom-value">100%</span>
             </div>
           </div>
@@ -1631,7 +1632,7 @@ function renderReaderPage(journal) {
       </main>
     </div>
     <script src="${PDFJS_URL}"></script>
-    <script src="/static/reader.js?v=6"></script>
+    <script src="/static/reader.js?v=7"></script>
   </body>
 </html>`;
 }

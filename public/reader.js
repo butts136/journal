@@ -6,7 +6,10 @@
   const modeCycleButton = document.getElementById("mode-cycle-button");
   const zoomControl = document.getElementById("zoom-control");
   const zoomToggleButton = document.getElementById("zoom-toggle-button");
+  const zoomButtonValue = document.getElementById("zoom-button-value");
   const zoomPanel = document.getElementById("zoom-panel");
+  const zoomDecreaseButton = document.getElementById("zoom-decrease-button");
+  const zoomIncreaseButton = document.getElementById("zoom-increase-button");
   const zoomRange = document.getElementById("zoom-range");
   const zoomValue = document.getElementById("zoom-value");
   const fullscreenToggleButton = document.getElementById("fullscreen-toggle-button");
@@ -58,12 +61,18 @@
   }
 
   function updateZoomUi() {
+    const formattedZoom = `${Math.round(zoom * 100)}%`;
+
     if (zoomRange) {
       zoomRange.value = String(Math.round(zoom * 100));
     }
 
+    if (zoomButtonValue) {
+      zoomButtonValue.textContent = formattedZoom;
+    }
+
     if (zoomValue) {
-      zoomValue.textContent = `${Math.round(zoom * 100)}%`;
+      zoomValue.textContent = formattedZoom;
     }
   }
 
@@ -351,6 +360,22 @@
   if (zoomRange) {
     zoomRange.addEventListener("input", () => {
       changeZoom(Number(zoomRange.value) / 100);
+    });
+  }
+
+  if (zoomDecreaseButton) {
+    zoomDecreaseButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      changeZoom(zoom - 0.1);
+    });
+  }
+
+  if (zoomIncreaseButton) {
+    zoomIncreaseButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      changeZoom(zoom + 0.1);
     });
   }
 
