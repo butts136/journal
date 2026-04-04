@@ -1560,20 +1560,24 @@ function renderReaderPage(journal) {
         </div>
         <div class="reader-toolbar-actions">
           <span class="reader-status" id="reader-status">Chargement...</span>
+          <button type="button" class="mode-button" id="zoom-out-button">Zoom -</button>
+          <button type="button" class="mode-button" id="zoom-reset-button">100%</button>
+          <button type="button" class="mode-button" id="zoom-in-button">Zoom +</button>
           <button type="button" class="mode-button is-active" data-mode="vertical">Vertical</button>
           <button type="button" class="mode-button" data-mode="horizontal">Horizontal</button>
           <a class="button-secondary compact-button" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noreferrer">PDF</a>
         </div>
       </header>
       <main id="reader-root" class="reader-stage" data-pdf-url="${escapeHtml(pdfUrl)}">
-        <iframe class="reader-native-frame" src="${escapeHtml(pdfUrl)}#view=FitH" title="${escapeHtml(
-          journal.display_title,
-        )}"></iframe>
-        <div class="reader-pages mode-vertical"></div>
+        <div class="reader-viewport" id="reader-viewport">
+          <div class="reader-pan-stage" id="reader-pan-stage">
+            <div class="reader-pages mode-vertical"></div>
+          </div>
+        </div>
       </main>
     </div>
     <script src="${PDFJS_URL}"></script>
-    <script src="/static/reader.js?v=2"></script>
+    <script src="/static/reader.js?v=3"></script>
   </body>
 </html>`;
 }

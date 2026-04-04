@@ -425,28 +425,34 @@ h3 {
 .reader-stage {
   position: relative;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   background:
     radial-gradient(circle at top, rgba(54, 57, 63, 0.5), transparent 24%),
     #111315;
 }
 
-.reader-native-frame {
+.reader-viewport {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: #1b1e22;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
 }
 
-.reader-stage.is-custom-ready .reader-native-frame {
-  display: none;
+.reader-viewport.is-dragging {
+  cursor: grabbing;
+}
+
+.reader-pan-stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: top left;
+  will-change: transform;
 }
 
 .reader-pages {
   position: relative;
-  z-index: 1;
   min-height: 100%;
 }
 
@@ -484,6 +490,7 @@ h3 {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: #f2ede6;
+  line-height: 1.5;
 }
 
 .reader-fallback p {
