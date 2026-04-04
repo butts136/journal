@@ -1,8 +1,10 @@
 const http = require("node:http");
+const https = require("node:https");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const zlib = require("node:zlib");
 
 const Database = require("better-sqlite3");
 const { XMLParser } = require("fast-xml-parser");
@@ -641,20 +643,87 @@ function withQuery(urlString, query) {
   return target.toString();
 }
 
+function fetchUrlText(urlString, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirectCount > 5) {
+      reject(new Error("Trop de redirections RSS."));
+      return;
+    }
+
+    const target = new URL(urlString);
+    const client = target.protocol === "https:" ? https : http;
+    const request = client.request(
+      target,
+      {
+        method: "GET",
+        headers: {
+          "user-agent": "Le-Kiosque-Lite/1.0",
+          accept: "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.5",
+          "accept-encoding": "gzip, deflate, br",
+        },
+        timeout: 15000,
+      },
+      (response) => {
+        const statusCode = response.statusCode || 0;
+
+        if ([301, 302, 303, 307, 308].includes(statusCode) && response.headers.location) {
+          response.resume();
+          const nextUrl = new URL(response.headers.location, target).toString();
+          fetchUrlText(nextUrl, redirectCount + 1).then(resolve).catch(reject);
+          return;
+        }
+
+        if (statusCode < 200 || statusCode >= 300) {
+          response.resume();
+          reject(new Error(`Flux RSS inaccessible: ${statusCode}`));
+          return;
+        }
+
+        let stream = response;
+        const encoding = String(response.headers["content-encoding"] || "").toLowerCase();
+
+        if (encoding.includes("gzip")) {
+          stream = response.pipe(zlib.createGunzip());
+        } else if (encoding.includes("deflate")) {
+          stream = response.pipe(zlib.createInflate());
+        } else if (encoding.includes("br")) {
+          stream = response.pipe(zlib.createBrotliDecompress());
+        }
+
+        const chunks = [];
+        let totalSize = 0;
+
+        stream.on("data", (chunk) => {
+          totalSize += chunk.length;
+
+          if (totalSize > 8 * 1024 * 1024) {
+            request.destroy(new Error("Flux RSS trop volumineux."));
+            return;
+          }
+
+          chunks.push(chunk);
+        });
+
+        stream.on("end", () => {
+          resolve(Buffer.concat(chunks).toString("utf8"));
+        });
+
+        stream.on("error", reject);
+      },
+    );
+
+    request.on("timeout", () => {
+      request.destroy(new Error("Flux RSS trop lent ou indisponible."));
+    });
+
+    request.on("error", reject);
+    request.end();
+  });
+}
+
 async function fetchRssItems(feedUrl, query) {
   const targetUrl = query ? withQuery(feedUrl, query) : feedUrl;
-  const response = await fetch(targetUrl, {
-    cache: "no-store",
-    headers: {
-      "user-agent": "Le-Kiosque-Lite/1.0",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Flux RSS inaccessible: ${response.status}`);
-  }
-
-  const xml = await response.text();
+  const xml = await fetchUrlText(targetUrl);
   const parsed = parser.parse(xml);
   const rawItems = parsed && parsed.rss && parsed.rss.channel ? parsed.rss.channel.item || [] : [];
   const items = Array.isArray(rawItems) ? rawItems : [rawItems];
