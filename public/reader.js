@@ -4,12 +4,6 @@
   const viewportNode = document.getElementById("reader-viewport");
   const panStageNode = document.getElementById("reader-pan-stage");
   const modeCycleButton = document.getElementById("mode-cycle-button");
-  const zoomControl = document.getElementById("zoom-control");
-  const zoomToggleButton = document.getElementById("zoom-toggle-button");
-  const zoomButtonValue = document.getElementById("zoom-button-value");
-  const zoomPanel = document.getElementById("zoom-panel");
-  const zoomDecreaseButton = document.getElementById("zoom-decrease-button");
-  const zoomIncreaseButton = document.getElementById("zoom-increase-button");
   const zoomRange = document.getElementById("zoom-range");
   const zoomValue = document.getElementById("zoom-value");
   const fullscreenToggleButton = document.getElementById("fullscreen-toggle-button");
@@ -65,10 +59,6 @@
 
     if (zoomRange) {
       zoomRange.value = String(Math.round(zoom * 100));
-    }
-
-    if (zoomButtonValue) {
-      zoomButtonValue.textContent = formattedZoom;
     }
 
     if (zoomValue) {
@@ -313,24 +303,23 @@
     setMode(nextMode.key);
   }
 
-  function toggleZoomPanel(forceOpen) {
-    if (!zoomPanel || !zoomToggleButton) {
-      return;
-    }
-
-    const nextOpen = typeof forceOpen === "boolean" ? forceOpen : zoomPanel.hidden;
-    zoomPanel.hidden = !nextOpen;
-    zoomToggleButton.classList.toggle("is-active", nextOpen);
-  }
-
-  function changeZoom(nextZoom) {
+  function changeZoom(nextZoom, anchorX, anchorY) {
     const boundedZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom));
 
     if (Math.abs(boundedZoom - zoom) < 0.001) {
       return;
     }
 
+    const viewportWidth = viewportNode.clientWidth;
+    const viewportHeight = viewportNode.clientHeight;
+    const pivotX = typeof anchorX === "number" ? anchorX : viewportWidth / 2;
+    const pivotY = typeof anchorY === "number" ? anchorY : viewportHeight / 2;
+    const logicalX = (pivotX - offsetX) / zoom;
+    const logicalY = (pivotY - offsetY) / zoom;
+
     zoom = boundedZoom;
+    offsetX = pivotX - logicalX * zoom;
+    offsetY = pivotY - logicalY * zoom;
     applyPanZoom();
   }
 
@@ -342,46 +331,11 @@
     });
   }
 
-  if (zoomToggleButton) {
-    zoomToggleButton.addEventListener("click", (event) => {
-      event.stopPropagation();
-      toggleZoomPanel();
-    });
-  }
-
   if (zoomRange) {
     zoomRange.addEventListener("input", () => {
       changeZoom(Number(zoomRange.value) / 100);
     });
   }
-
-  if (zoomDecreaseButton) {
-    zoomDecreaseButton.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      changeZoom(zoom - 0.1);
-    });
-  }
-
-  if (zoomIncreaseButton) {
-    zoomIncreaseButton.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      changeZoom(zoom + 0.1);
-    });
-  }
-
-  document.addEventListener("click", (event) => {
-    if (!zoomControl || !zoomPanel || zoomPanel.hidden) {
-      return;
-    }
-
-    if (zoomControl.contains(event.target)) {
-      return;
-    }
-
-    toggleZoomPanel(false);
-  });
 
   function updateFullscreenButton() {
     if (!fullscreenToggleButton) {
@@ -501,9 +455,6 @@
       case "ArrowRight":
         event.preventDefault();
         moveBy(-step, 0);
-        break;
-      case "Escape":
-        toggleZoomPanel(false);
         break;
       default:
         break;

@@ -1598,23 +1598,16 @@ function renderReaderPage(journal) {
     <div class="reader-screen">
       <header class="reader-toolbar">
         <div class="reader-toolbar-main">
-          <a class="reader-nav-button back-link" href="/">Retour</a>
+          <a class="reader-control-button back-link" href="/">Retour</a>
           <strong class="reader-title">${escapeHtml(journal.display_title)}</strong>
         </div>
         <div class="reader-toolbar-actions">
           <span class="reader-status" id="reader-status">Chargement...</span>
           <button type="button" class="reader-control-button" id="mode-cycle-button">2 pages</button>
-          <div class="reader-zoom-control" id="zoom-control">
-            <button type="button" class="reader-control-button reader-zoom-toggle" id="zoom-toggle-button" aria-label="Zoom" title="Zoom">
-              <span>Zoom</span>
-              <strong id="zoom-button-value">100%</strong>
-            </button>
-            <div class="reader-zoom-panel" id="zoom-panel" hidden>
-              <button type="button" class="reader-zoom-step" id="zoom-decrease-button" aria-label="Reduire le zoom">-</button>
-              <input id="zoom-range" class="reader-zoom-range" type="range" min="35" max="250" step="5" value="100" />
-              <button type="button" class="reader-zoom-step" id="zoom-increase-button" aria-label="Augmenter le zoom">+</button>
-              <span id="zoom-value" class="reader-zoom-value">100%</span>
-            </div>
+          <div class="reader-zoom-strip" id="zoom-control">
+            <span class="reader-zoom-label">Zoom</span>
+            <input id="zoom-range" class="reader-zoom-range" type="range" min="35" max="250" step="5" value="100" />
+            <span id="zoom-value" class="reader-zoom-value">100%</span>
           </div>
           <button type="button" class="reader-icon-button" id="fullscreen-toggle-button" aria-label="Plein ecran" title="Plein ecran">
             <svg viewBox="0 0 24 24" aria-hidden="true">
