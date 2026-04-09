@@ -95,7 +95,7 @@ MONTH_TOKENS = {
 }
 
 DATE_PATTERN = re.compile(
-    r"\b(\d{1,2})(?:\s+(\d{1,2}))?\s+"
+    r"\b(\d{1,2})(?:\s+(\d{1,2}))?\s*"
     r"(janvier|january|jan|fevrier|february|fevr|fev|feb|mars|march|mar|"
     r"avril|april|avr|apr|mai|may|juin|june|jun|juillet|july|juil|jul|"
     r"aout|august|aou|aug|septembre|september|sept|sep|octobre|october|oct|"
@@ -125,6 +125,8 @@ def normalize_text(value: str) -> str:
     normalized = "".join(character for character in normalized if not unicodedata.combining(character))
     normalized = normalized.lower()
     normalized = re.sub(r"[\[\]().,_-]+", " ", normalized)
+    normalized = re.sub(r"(?<=\d)(?=[a-z])", " ", normalized)
+    normalized = re.sub(r"(?<=[a-z])(?=\d)", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized.strip()
 
@@ -235,6 +237,8 @@ def initialize_database(connection: sqlite3.Connection) -> None:
           session_secret TEXT NOT NULL,
           poll_interval_seconds INTEGER NOT NULL DEFAULT 180,
           max_journal_age_days INTEGER,
+          search_terms_revision INTEGER NOT NULL DEFAULT 0,
+          last_deep_scan_revision INTEGER,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
@@ -295,6 +299,10 @@ def initialize_database(connection: sqlite3.Connection) -> None:
     columns = connection.execute("PRAGMA table_info(app_config)").fetchall()
     if not any(column["name"] == "max_journal_age_days" for column in columns):
         connection.execute("ALTER TABLE app_config ADD COLUMN max_journal_age_days INTEGER")
+    if not any(column["name"] == "search_terms_revision" for column in columns):
+        connection.execute("ALTER TABLE app_config ADD COLUMN search_terms_revision INTEGER NOT NULL DEFAULT 0")
+    if not any(column["name"] == "last_deep_scan_revision" for column in columns):
+        connection.execute("ALTER TABLE app_config ADD COLUMN last_deep_scan_revision INTEGER")
 
     connection.commit()
 
@@ -318,13 +326,15 @@ def execute(sql: str, params: tuple = ()) -> sqlite3.Cursor:
 
 def get_app_config() -> dict:
     row = query_one(
-        "SELECT admin_password_hash, session_secret, poll_interval_seconds, max_journal_age_days FROM app_config WHERE id = 1"
+        "SELECT admin_password_hash, session_secret, poll_interval_seconds, max_journal_age_days, search_terms_revision, last_deep_scan_revision FROM app_config WHERE id = 1"
     )
     return {
         "admin_password_hash": row["admin_password_hash"] if row else None,
         "session_secret": row["session_secret"] if row else "",
         "poll_interval_seconds": row["poll_interval_seconds"] if row and row["poll_interval_seconds"] else DEFAULT_POLL_INTERVAL_SECONDS,
         "max_journal_age_days": row["max_journal_age_days"] if row and row["max_journal_age_days"] else None,
+        "search_terms_revision": row["search_terms_revision"] if row else 0,
+        "last_deep_scan_revision": row["last_deep_scan_revision"] if row else None,
     }
 
 
@@ -349,6 +359,19 @@ def set_max_journal_age_days(value: str) -> None:
     execute(
         "UPDATE app_config SET max_journal_age_days = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
         (max_journal_age_days,),
+    )
+
+
+def bump_search_terms_revision() -> None:
+    execute(
+        "UPDATE app_config SET search_terms_revision = COALESCE(search_terms_revision, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1"
+    )
+
+
+def mark_deep_scan_complete(revision: int) -> None:
+    execute(
+        "UPDATE app_config SET last_deep_scan_revision = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+        (revision,),
     )
 
 
@@ -403,15 +426,23 @@ def get_all_search_terms() -> list[dict]:
 def add_search_term(label: str) -> None:
     clean_label = str(label or "").strip()
     normalized = normalize_text(clean_label)
+    before = query_one("SELECT COUNT(*) AS count FROM search_terms")["count"]
     if clean_label and normalized:
         execute(
             "INSERT OR IGNORE INTO search_terms (label, normalized_label) VALUES (?, ?)",
             (clean_label, normalized),
         )
+        after = query_one("SELECT COUNT(*) AS count FROM search_terms")["count"]
+        if after > before:
+            bump_search_terms_revision()
 
 
 def remove_search_term(term_id: int) -> None:
+    before = query_one("SELECT COUNT(*) AS count FROM search_terms")["count"]
     execute("DELETE FROM search_terms WHERE id = ?", (term_id,))
+    after = query_one("SELECT COUNT(*) AS count FROM search_terms")["count"]
+    if after < before:
+        bump_search_terms_revision()
 
 
 def create_journal_if_missing(payload: dict) -> dict:
@@ -580,6 +611,18 @@ def is_journal_too_old(publication_date: date, max_journal_age_days: Optional[in
         return False
     age_limit = date.today() - timedelta(days=max_journal_age_days - 1)
     return publication_date < age_limit
+
+
+def get_scan_window_days(config: dict) -> tuple[int, bool]:
+    is_deep_scan = (
+        config.get("last_deep_scan_revision") is None
+        or config.get("last_deep_scan_revision") != config.get("search_terms_revision")
+    )
+    window_days = 30 if is_deep_scan else 3
+    retention_days = config.get("max_journal_age_days")
+    if retention_days:
+        window_days = min(window_days, int(retention_days))
+    return max(1, int(window_days)), is_deep_scan
 
 
 def build_journal_storage_paths(publication_key: str, date_key: str) -> dict:
@@ -838,13 +881,12 @@ def broadcast_event(event_type: str, payload: dict) -> None:
         client.put((event_type, payload))
 
 
-def process_feed_item(feed_id: int, item: dict) -> None:
+def process_feed_item(feed_id: int, item: dict, max_scan_age_days: int) -> None:
     parsed = parse_journal_candidate(item, get_enabled_search_terms())
     if not parsed:
         return
 
-    config = get_app_config()
-    if is_journal_too_old(parsed["publication_date"], config["max_journal_age_days"]):
+    if is_journal_too_old(parsed["publication_date"], max_scan_age_days):
         return
 
     journal = create_journal_if_missing(
@@ -891,9 +933,9 @@ def process_feed_item(feed_id: int, item: dict) -> None:
         broadcast_event("journal-error", {"id": journal["id"], "message": message})
 
 
-def scan_feed(feed: dict, term_label: Optional[str] = None) -> None:
+def scan_feed(feed: dict, max_scan_age_days: int, term_label: Optional[str] = None) -> None:
     for item in fetch_rss_items(feed["url"], term_label):
-        process_feed_item(feed["id"], item)
+        process_feed_item(feed["id"], item, max_scan_age_days)
 
 
 def run_scan_cycle() -> None:
@@ -907,12 +949,17 @@ def run_scan_cycle() -> None:
     broadcast_event("scan-started", {"time": int(time.time() * 1000)})
 
     try:
+        config = get_app_config()
+        max_scan_age_days, is_deep_scan = get_scan_window_days(config)
+
         for feed in feeds:
             if is_queryable_search_feed(feed["url"]):
                 for term in terms:
-                    scan_feed(feed, term["label"])
+                    scan_feed(feed, max_scan_age_days, term["label"])
             else:
-                scan_feed(feed)
+                scan_feed(feed, max_scan_age_days)
+        if is_deep_scan:
+            mark_deep_scan_complete(config["search_terms_revision"])
         runtime.last_success_at = datetime.utcnow().isoformat()
     except Exception as exc:
         runtime.last_error = str(exc) or "Echec inconnu pendant le scan."
@@ -1012,6 +1059,15 @@ def get_flash(params: dict) -> str:
     return f'<div class="flash flash-{escape_html(flash_type)}">{escape_html(message)}</div>'
 
 
+def render_book_icon() -> str:
+    return (
+        '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+        '<path d="M12 6.2C10.2 4.8 7.7 4 5 4H4.5A1.5 1.5 0 0 0 3 5.5v12A1.5 1.5 0 0 0 4.5 19H5c2.7 0 5.2.8 7 2.2 1.8-1.4 4.3-2.2 7-2.2h.5a1.5 1.5 0 0 0 1.5-1.5v-12A1.5 1.5 0 0 0 19.5 4H19c-2.7 0-5.2.8-7 2.2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>'
+        '<path d="M12 6.2V21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>'
+        "</svg>"
+    )
+
+
 def render_shell(title: str, body: str, current_path: str = "/", scripts: Optional[list[str]] = None, body_class: str = "", base_path: str = "") -> str:
     scripts = scripts or []
     configured = is_configured()
@@ -1022,13 +1078,14 @@ def render_shell(title: str, body: str, current_path: str = "/", scripts: Option
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{escape_html(title)} | {APP_NAME}</title>
+    <link rel="icon" type="image/svg+xml" href="{escape_html(with_base_path(base_path, "/static/favicon.svg"))}" />
     <link rel="stylesheet" href="{escape_html(with_base_path(base_path, "/static/styles.css"))}" />
   </head>
   <body class="{escape_html(body_class)}" data-base-path="{escape_html(base_path)}">
     <div class="page-shell">
       <header class="topbar">
         <a class="brand" href="{escape_html(with_base_path(base_path, "/"))}">
-          <span class="brand-mark">LK</span>
+          <span class="brand-mark">{render_book_icon()}</span>
           <span><strong>{APP_NAME}</strong><small>Lecteur de journaux PDF</small></span>
         </a>
         <nav class="nav">
@@ -1076,11 +1133,32 @@ def render_journal_grid(journals: list[dict], base_path: str = "") -> str:
 
 
 def render_home_page(query: dict, base_path: str) -> str:
+    recent_journals = get_recent_journals()
+    featured = recent_journals[0] if recent_journals else None
+    featured_block = ""
+
+    if featured:
+        featured_reader_href = with_base_path(base_path, f"/reader/{featured['id']}")
+        featured_date = parse_date_key(featured.get("publication_date"))
+        featured_block = (
+            '<section class="home-feature">'
+            '<div class="home-feature-copy">'
+            '<span class="eyebrow">Edition en vedette</span>'
+            f'<h1>{escape_html(featured["display_title"])}</h1>'
+            f'<p>{escape_html(format_french_date(featured_date) if featured_date else featured.get("publication_date", ""))}</p>'
+            f'<div class="home-feature-actions"><a class="button-secondary" href="{escape_html(featured_reader_href)}">Ouvrir le journal</a>'
+            f'<a class="button-secondary" href="{escape_html(with_base_path(base_path, "/archives"))}">Parcourir les archives</a></div>'
+            '</div>'
+            f'<div class="home-feature-card">{render_journal_card(featured, base_path, True)}</div>'
+            "</section>"
+        )
+
     body = (
         f"{get_flash(query)}"
+        f"{featured_block}"
         '<section class="section-head"><h2>Dernieres editions</h2>'
         f'<a href="{escape_html(with_base_path(base_path, "/archives"))}">Voir les archives</a></section>'
-        f"{render_journal_grid(get_recent_journals(), base_path)}"
+        f"{render_journal_grid(recent_journals, base_path)}"
     )
     return render_shell("Accueil", body, current_path="/", scripts=[PDFJS_URL, "/static/app.js"], body_class="catalog-body", base_path=base_path)
 
@@ -1187,6 +1265,7 @@ def render_reader_page(journal: dict, base_path: str) -> str:
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{escape_html(journal["display_title"])} | {APP_NAME}</title>
+    <link rel="icon" type="image/svg+xml" href="{escape_html(with_base_path(base_path, "/static/favicon.svg"))}" />
     <link rel="stylesheet" href="{escape_html(with_base_path(base_path, "/static/styles.css"))}" />
   </head>
   <body class="reader-body" data-base-path="{escape_html(base_path)}">
