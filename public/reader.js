@@ -13,6 +13,7 @@
   }
 
   const pdfUrl = root.dataset.pdfUrl;
+  const MODE_COOKIE = "journal_reader_mode";
   const pagesNode = root.querySelector(".reader-pages");
   const modes = [
     { key: "spread", label: "2 pages" },
@@ -42,6 +43,26 @@
   let renderQueue = [];
   let scheduledVisibilityPass = 0;
   let activeRenders = 0;
+
+  function readCookie(name) {
+    const entries = document.cookie ? document.cookie.split(/;\s*/) : [];
+    for (const entry of entries) {
+      const index = entry.indexOf("=");
+      if (index === -1) {
+        continue;
+      }
+      const key = entry.slice(0, index);
+      const value = entry.slice(index + 1);
+      if (key === name) {
+        return decodeURIComponent(value);
+      }
+    }
+    return "";
+  }
+
+  function writeCookie(name, value) {
+    document.cookie = `${name}=${encodeURIComponent(value || "")}; path=/; SameSite=Lax; Max-Age=315360000`;
+  }
 
   function setStatus(text) {
     statusNode.textContent = text;
@@ -433,6 +454,7 @@
 
   function setMode(mode, options = {}) {
     currentMode = modes.some((entry) => entry.key === mode) ? mode : "spread";
+    writeCookie(MODE_COOKIE, currentMode);
     pagesNode.classList.remove("mode-vertical", "mode-horizontal", "mode-spread");
     pagesNode.classList.add(
       currentMode === "horizontal"
@@ -668,6 +690,6 @@
 
   updateModeButton();
   updateZoomUi();
-  setMode("spread", { rerender: false });
+  setMode(readCookie(MODE_COOKIE) || "spread", { rerender: false });
   boot();
 })();

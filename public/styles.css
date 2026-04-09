@@ -322,6 +322,31 @@ body.catalog-body .hero-stats div {
   min-height: 100%;
 }
 
+.filter-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.filter-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.2rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(243, 238, 230, 0.72);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.filter-badge.is-active {
+  background: rgba(242, 155, 114, 0.14);
+  border-color: rgba(242, 155, 114, 0.34);
+  color: #ffd5c2;
+}
+
 .section-head {
   margin: 1.1rem 0;
 }
@@ -464,6 +489,93 @@ body.catalog-body .journal-thumb {
 .feed-list {
   display: grid;
   gap: 0.85rem;
+}
+
+.journal-admin-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.journal-admin-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.journal-admin-group {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.journal-admin-group summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  list-style: none;
+  cursor: pointer;
+  padding: 1rem 1.1rem;
+}
+
+.journal-admin-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.journal-admin-group summary small {
+  color: rgba(243, 238, 230, 0.62);
+}
+
+.journal-admin-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.85rem 1.1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.journal-admin-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+}
+
+.journal-admin-select input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
+.journal-admin-link {
+  min-width: 0;
+}
+
+.journal-admin-link strong,
+.journal-admin-link span {
+  display: block;
+}
+
+.journal-admin-link span {
+  color: rgba(243, 238, 230, 0.62);
+  font-size: 0.88rem;
+}
+
+.danger-button {
+  min-width: 2rem;
+  min-height: 2rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(185, 69, 45, 0.16);
+  border: 1px solid rgba(242, 155, 114, 0.18);
+  color: #ffd3c3;
+  box-shadow: none;
+}
+
+.large-danger {
+  min-height: 2.3rem;
+  padding-inline: 1rem;
 }
 
 .inline-form {

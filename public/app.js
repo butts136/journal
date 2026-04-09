@@ -1,7 +1,9 @@
 (function () {
   const THUMB_CACHE_PREFIX = "journal-thumb:v1:";
+  const HOME_FILTER_COOKIE = "journal_home_filter";
   const thumbMemoryCache = new Map();
   const basePath = document.body ? document.body.dataset.basePath || "" : "";
+  const filterBadges = Array.from(document.querySelectorAll("[data-publication-filter]"));
 
   if (window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -24,6 +26,10 @@
     }
 
     return `${basePath}${target.startsWith("/") ? target : `/${target}`}`;
+  }
+
+  function setCookie(name, value) {
+    document.cookie = `${name}=${encodeURIComponent(value || "")}; path=/; SameSite=Lax; Max-Age=315360000`;
   }
 
   function getThumbCacheKey(pdfUrl) {
@@ -181,6 +187,12 @@
   } else {
     cards.forEach(renderCard);
   }
+
+  filterBadges.forEach((badge) => {
+    badge.addEventListener("click", () => {
+      setCookie(HOME_FILTER_COOKIE, badge.dataset.publicationFilter || "");
+    });
+  });
 
   if (window.EventSource) {
     const stream = new EventSource(withBasePath("/events"));

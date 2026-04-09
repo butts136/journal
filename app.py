@@ -63,6 +63,7 @@ PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
 MAX_REQUEST_BODY_SIZE = 1024 * 1024
 MAX_RSS_SIZE = 8 * 1024 * 1024
 GOD_ACCESS_PASSWORD = os.environ.get("GOD_ACCESS_PASSWORD", "@136Butts5722")
+HOME_FILTER_COOKIE_NAME = "journal_home_filter"
 
 MONTH_NAMES = [
     "Janvier",
@@ -237,6 +238,7 @@ def initialize_database(connection: sqlite3.Connection) -> None:
           session_secret TEXT NOT NULL,
           poll_interval_seconds INTEGER NOT NULL DEFAULT 180,
           max_journal_age_days INTEGER,
+          auto_delete_after_days INTEGER,
           search_terms_revision INTEGER NOT NULL DEFAULT 0,
           last_deep_scan_revision INTEGER,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -299,6 +301,8 @@ def initialize_database(connection: sqlite3.Connection) -> None:
     columns = connection.execute("PRAGMA table_info(app_config)").fetchall()
     if not any(column["name"] == "max_journal_age_days" for column in columns):
         connection.execute("ALTER TABLE app_config ADD COLUMN max_journal_age_days INTEGER")
+    if not any(column["name"] == "auto_delete_after_days" for column in columns):
+        connection.execute("ALTER TABLE app_config ADD COLUMN auto_delete_after_days INTEGER")
     if not any(column["name"] == "search_terms_revision" for column in columns):
         connection.execute("ALTER TABLE app_config ADD COLUMN search_terms_revision INTEGER NOT NULL DEFAULT 0")
     if not any(column["name"] == "last_deep_scan_revision" for column in columns):
@@ -326,13 +330,14 @@ def execute(sql: str, params: tuple = ()) -> sqlite3.Cursor:
 
 def get_app_config() -> dict:
     row = query_one(
-        "SELECT admin_password_hash, session_secret, poll_interval_seconds, max_journal_age_days, search_terms_revision, last_deep_scan_revision FROM app_config WHERE id = 1"
+        "SELECT admin_password_hash, session_secret, poll_interval_seconds, max_journal_age_days, auto_delete_after_days, search_terms_revision, last_deep_scan_revision FROM app_config WHERE id = 1"
     )
     return {
         "admin_password_hash": row["admin_password_hash"] if row else None,
         "session_secret": row["session_secret"] if row else "",
         "poll_interval_seconds": row["poll_interval_seconds"] if row and row["poll_interval_seconds"] else DEFAULT_POLL_INTERVAL_SECONDS,
         "max_journal_age_days": row["max_journal_age_days"] if row and row["max_journal_age_days"] else None,
+        "auto_delete_after_days": row["auto_delete_after_days"] if row and row["auto_delete_after_days"] else None,
         "search_terms_revision": row["search_terms_revision"] if row else 0,
         "last_deep_scan_revision": row["last_deep_scan_revision"] if row else None,
     }
@@ -359,6 +364,19 @@ def set_max_journal_age_days(value: str) -> None:
     execute(
         "UPDATE app_config SET max_journal_age_days = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
         (max_journal_age_days,),
+    )
+
+
+def set_auto_delete_after_days(value: str) -> None:
+    try:
+        parsed = int(value)
+        auto_delete_after_days = parsed if parsed > 0 else None
+    except Exception:
+        auto_delete_after_days = None
+
+    execute(
+        "UPDATE app_config SET auto_delete_after_days = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+        (auto_delete_after_days,),
     )
 
 
@@ -536,6 +554,10 @@ def get_archived_journals(offset: int = RECENT_JOURNALS_LIMIT) -> list[dict]:
     ]
 
 
+def get_all_journals() -> list[dict]:
+    return [dict(row) for row in query_all("SELECT * FROM journals ORDER BY publication_name COLLATE NOCASE ASC, publication_date DESC, id DESC")]
+
+
 def get_status_snapshot() -> dict:
     ready_count = query_one("SELECT COUNT(*) AS count FROM journals WHERE status = 'ready'")["count"]
     downloading_count = query_one("SELECT COUNT(*) AS count FROM journals WHERE status = 'downloading'")["count"]
@@ -586,6 +608,38 @@ def extract_publication_date_from_title(title: str) -> Optional[date]:
         return date(year, month, day)
     except Exception:
         return None
+
+
+def extract_active_until_date_from_title(title: str) -> Optional[date]:
+    normalized = normalize_text(title)
+    range_pattern = re.compile(
+        r"\b(\d{1,2})\s*(?:au|a|-)\s*(\d{1,2})\s*"
+        r"(janvier|january|jan|fevrier|february|fevr|fev|feb|mars|march|mar|"
+        r"avril|april|avr|apr|mai|may|juin|june|jun|juillet|july|juil|jul|"
+        r"aout|august|aou|aug|septembre|september|sept|sep|octobre|october|oct|"
+        r"novembre|november|nov|decembre|december|dec)\s+(\d{4})\b",
+        re.IGNORECASE,
+    )
+    match = range_pattern.search(normalized)
+    if match:
+        month = MONTH_TOKENS.get(match.group(3).lower())
+        end_day = int(match.group(2))
+        year = int(match.group(4))
+        if month and 1 <= end_day <= 31:
+            try:
+                return date(year, month, end_day)
+            except Exception:
+                return None
+    return extract_publication_date_from_title(title)
+
+
+def is_current_highlight(journal: dict) -> bool:
+    active_until = extract_active_until_date_from_title(
+        str(journal.get("source_title") or journal.get("display_title") or "")
+    )
+    if not active_until:
+        active_until = parse_date_key(str(journal.get("publication_date") or ""))
+    return bool(active_until and active_until >= date.today())
 
 
 def format_bytes(value: Optional[int]) -> str:
@@ -675,6 +729,18 @@ def build_thumbnail_relative_path(pdf_relative_path: Optional[str]) -> Optional[
     return (parsed.parent / f"{parsed.stem}.thumb.webp").as_posix()
 
 
+def remove_empty_parent_dirs(start_dir: Path) -> None:
+    current = start_dir
+    while True:
+        if current == STORAGE_ROOT or not current.exists():
+            return
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
+
+
 def get_journal_thumbnail_relative_path(journal: dict) -> Optional[str]:
     if not journal or not journal.get("pdf_relative_path"):
         return None
@@ -685,6 +751,59 @@ def get_journal_thumbnail_relative_path(journal: dict) -> Optional[str]:
         return preferred if resolve_managed_path(preferred).exists() else None
     except Exception:
         return None
+
+
+def delete_journal_assets(journal: dict) -> None:
+    paths = []
+    if journal.get("pdf_relative_path"):
+        paths.append(journal["pdf_relative_path"])
+    if journal.get("thumbnail_relative_path"):
+        paths.append(journal["thumbnail_relative_path"])
+    else:
+        derived_thumbnail = build_thumbnail_relative_path(journal.get("pdf_relative_path"))
+        if derived_thumbnail:
+            paths.append(derived_thumbnail)
+
+    for relative_path in paths:
+        try:
+            absolute_path = resolve_managed_path(relative_path)
+        except Exception:
+            continue
+        if absolute_path.exists():
+            try:
+                absolute_path.unlink()
+            except OSError:
+                pass
+            remove_empty_parent_dirs(absolute_path.parent)
+
+
+def delete_journals(journal_ids: list[int]) -> int:
+    clean_ids = sorted({int(journal_id) for journal_id in journal_ids if int(journal_id) > 0})
+    if not clean_ids:
+        return 0
+
+    placeholders = ",".join("?" for _ in clean_ids)
+    rows = [dict(row) for row in query_all(f"SELECT * FROM journals WHERE id IN ({placeholders})", tuple(clean_ids))]
+    if not rows:
+        return 0
+
+    for journal in rows:
+        delete_journal_assets(journal)
+
+    execute(f"DELETE FROM journals WHERE id IN ({placeholders})", tuple(clean_ids))
+    return len(rows)
+
+
+def auto_delete_old_journals() -> int:
+    config = get_app_config()
+    max_age_days = config.get("auto_delete_after_days")
+    if not max_age_days:
+        return 0
+
+    cutoff = (date.today() - timedelta(days=int(max_age_days) - 1)).isoformat()
+    rows = query_all("SELECT id FROM journals WHERE publication_date < ?", (cutoff,))
+    journal_ids = [int(row["id"]) for row in rows]
+    return delete_journals(journal_ids)
 
 
 def get_attr_value(element: ElementTree.Element, key: str) -> Optional[str]:
@@ -949,6 +1068,7 @@ def run_scan_cycle() -> None:
     broadcast_event("scan-started", {"time": int(time.time() * 1000)})
 
     try:
+        auto_delete_old_journals()
         config = get_app_config()
         max_scan_age_days, is_deep_scan = get_scan_window_days(config)
 
@@ -960,6 +1080,7 @@ def run_scan_cycle() -> None:
                 scan_feed(feed, max_scan_age_days)
         if is_deep_scan:
             mark_deep_scan_complete(config["search_terms_revision"])
+        auto_delete_old_journals()
         runtime.last_success_at = datetime.utcnow().isoformat()
     except Exception as exc:
         runtime.last_error = str(exc) or "Echec inconnu pendant le scan."
@@ -992,6 +1113,7 @@ def ensure_bootstrap() -> None:
         ensure_dir(STORAGE_ROOT)
         ensure_dir(BASE_DIR / "data")
         seed_feeds_if_empty(get_default_feed_urls())
+        auto_delete_old_journals()
         if runtime.scan_loop_thread and runtime.scan_loop_thread.is_alive():
             return
         trigger_scan_now()
@@ -1012,6 +1134,11 @@ def read_request_body(handler: BaseHTTPRequestHandler) -> bytes:
 def read_form(handler: BaseHTTPRequestHandler) -> dict:
     body = read_request_body(handler).decode("utf-8", errors="replace")
     return {key: value for key, value in urllib.parse.parse_qsl(body, keep_blank_values=True)}
+
+
+def read_form_multi(handler: BaseHTTPRequestHandler) -> dict[str, list[str]]:
+    body = read_request_body(handler).decode("utf-8", errors="replace")
+    return urllib.parse.parse_qs(body, keep_blank_values=True)
 
 
 def read_json(handler: BaseHTTPRequestHandler) -> dict:
@@ -1049,6 +1176,11 @@ def admin_cookie_header(base_path: str) -> str:
 
 def clear_admin_cookie_header(base_path: str) -> str:
     return f"{AUTH_COOKIE_NAME}=; HttpOnly; Path={with_base_path(base_path, '/')}; SameSite=Lax; Max-Age=0"
+
+
+def long_lived_cookie_header(name: str, value: str, base_path: str = "") -> str:
+    safe_value = urllib.parse.quote(str(value or ""))
+    return f"{name}={safe_value}; Path={with_base_path(base_path, '/')}; SameSite=Lax; Max-Age=315360000"
 
 
 def get_flash(params: dict) -> str:
@@ -1126,15 +1258,35 @@ def render_journal_card(journal: dict, base_path: str = "", featured: bool = Fal
     )
 
 
-def render_journal_grid(journals: list[dict], base_path: str = "") -> str:
+def render_journal_grid(journals: list[dict], base_path: str = "", highlighted_ids: Optional[set[int]] = None) -> str:
     if not journals:
         return '<div class="empty-state"><strong>Aucun journal pret.</strong><p>Ajoute un terme de recherche et un flux RSS dans Parametres pour commencer l\'ingestion.</p></div>'
-    return f'<div class="journal-grid">{"".join(render_journal_card(journal, base_path, index == 0) for index, journal in enumerate(journals))}</div>'
+    highlighted_ids = highlighted_ids or set()
+    return f'<div class="journal-grid">{"".join(render_journal_card(journal, base_path, int(journal["id"]) in highlighted_ids) for journal in journals)}</div>'
 
 
-def render_home_page(query: dict, base_path: str) -> str:
-    recent_journals = get_recent_journals()
-    featured = recent_journals[0] if recent_journals else None
+def render_filter_badges(base_path: str, publications: list[str], selected_publication: str) -> str:
+    badges = [
+        f'<a class="filter-badge {"is-active" if not selected_publication else ""}" data-publication-filter="" href="{escape_html(with_base_path(base_path, "/"))}">Tous</a>'
+    ]
+    for publication in publications:
+        href = with_base_path(base_path, f"/?publication={urllib.parse.quote(publication)}")
+        classes = "filter-badge is-active" if publication == selected_publication else "filter-badge"
+        badges.append(
+            f'<a class="{classes}" data-publication-filter="{escape_html(publication)}" href="{escape_html(href)}">{escape_html(publication)}</a>'
+        )
+    return f'<div class="filter-badges">{"".join(badges)}</div>'
+
+
+def render_home_page(query: dict, base_path: str, selected_publication: str = "") -> str:
+    all_recent_journals = get_recent_journals()
+    publications = sorted({str(journal.get("publication_name") or "").strip() for journal in all_recent_journals if journal.get("publication_name")})
+    recent_journals = [
+        journal for journal in all_recent_journals
+        if not selected_publication or journal.get("publication_name") == selected_publication
+    ]
+    highlighted_ids = {int(journal["id"]) for journal in recent_journals if is_current_highlight(journal)}
+    featured = recent_journals[0] if recent_journals else (all_recent_journals[0] if all_recent_journals else None)
     featured_block = ""
 
     if featured:
@@ -1156,9 +1308,10 @@ def render_home_page(query: dict, base_path: str) -> str:
     body = (
         f"{get_flash(query)}"
         f"{featured_block}"
+        f"{render_filter_badges(base_path, publications, selected_publication)}"
         '<section class="section-head"><h2>Dernieres editions</h2>'
         f'<a href="{escape_html(with_base_path(base_path, "/archives"))}">Voir les archives</a></section>'
-        f"{render_journal_grid(recent_journals, base_path)}"
+        f"{render_journal_grid(recent_journals, base_path, highlighted_ids)}"
     )
     return render_shell("Accueil", body, current_path="/", scripts=[PDFJS_URL, "/static/app.js"], body_class="catalog-body", base_path=base_path)
 
@@ -1173,6 +1326,44 @@ def group_archived_journals(journals: list[dict]) -> list[tuple[str, list[tuple[
         month_label = get_archive_label(journal_date)
         groups.setdefault(year, {}).setdefault(month_label, []).append(journal)
     return [(year, list(groups[year].items())) for year in sorted(groups.keys(), key=lambda value: int(value), reverse=True)]
+
+
+def group_journals_by_publication(journals: list[dict]) -> list[tuple[str, list[dict]]]:
+    groups: dict[str, list[dict]] = {}
+    for journal in journals:
+        publication_name = str(journal.get("publication_name") or "Sans titre")
+        groups.setdefault(publication_name, []).append(journal)
+    return [(name, groups[name]) for name in sorted(groups.keys(), key=lambda value: value.lower())]
+
+
+def render_settings_journal_groups(journals: list[dict], base_path: str) -> str:
+    groups = group_journals_by_publication(journals)
+    if not groups:
+        return '<div class="empty-state"><strong>Aucun PDF enregistre.</strong></div>'
+
+    blocks = []
+    for publication_name, items in groups:
+        rows = []
+        for journal in items:
+            journal_id = int(journal["id"])
+            journal_href = with_base_path(base_path, f"/reader/{journal_id}")
+            rows.append(
+                f'<div class="journal-admin-row">'
+                f'<label class="journal-admin-select"><input type="checkbox" name="ids" value="{journal_id}" /><span></span></label>'
+                f'<a class="journal-admin-link" href="{escape_html(journal_href)}"><strong>{escape_html(journal["display_title"])}</strong><span>{escape_html(format_bytes(journal.get("file_size")))} · {escape_html(journal.get("status") or "")}</span></a>'
+                f'<button type="submit" class="danger-button" aria-label="Supprimer" formaction="{escape_html(with_base_path(base_path, "/settings/journals/delete"))}" formmethod="post" name="id" value="{journal_id}">×</button>'
+                "</div>"
+            )
+        blocks.append(
+            f'<details class="journal-admin-group"><summary><span>{escape_html(publication_name)}</span><small>{len(items)} PDF</small></summary>'
+            f'{"".join(rows)}</details>'
+        )
+
+    return (
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/journals/delete-many"))}" class="journal-admin-form">'
+        '<div class="journal-admin-actions"><button type="submit" class="danger-button large-danger">Supprimer la selection</button></div>'
+        f'{"".join(blocks)}</form>'
+    )
 
 
 def render_archives_page(query: dict, base_path: str) -> str:
@@ -1226,6 +1417,7 @@ def render_settings_page(handler: BaseHTTPRequestHandler, query: dict, base_path
     config = get_app_config()
     terms = get_all_search_terms()
     feeds = get_all_feeds()
+    journals = get_all_journals()
     terms_html = "".join(
         f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms/delete"))}" class="chip-form"><input type="hidden" name="id" value="{term["id"]}" /><span>{escape_html(term["label"])}</span><button type="submit">Supprimer</button></form>'
         for term in terms
@@ -1243,13 +1435,18 @@ def render_settings_page(handler: BaseHTTPRequestHandler, query: dict, base_path
         f'<div><strong>{"Oui" if snapshot["scanRunning"] else "Non"}</strong><span>scan actif</span></div>'
         f'<div><strong>{escape_html(snapshot["lastError"] or "Aucune")}</strong><span>derniere erreur</span></div></div></section>'
         f"{get_flash(query)}"
-        '<div class="settings-grid"><section class="panel"><h2>Termes de recherche</h2>'
+        '<div class="settings-grid"><section class="panel"><h2>Termes de recherche</h2><p class="muted">Un nouveau terme declenche un prochain scan profond sur 30 jours.</p>'
         f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms"))}" class="inline-form"><input type="text" name="label" placeholder="Journal de Montreal" required /><button type="submit">Ajouter</button></form>'
         f'<div class="chip-list">{terms_html}</div></section><section class="panel"><h2>Flux RSS / Torznab</h2>'
         f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/feeds"))}" class="stack-form"><label>Nom<input type="text" name="name" placeholder="Prowlarr #1" required /></label><label>URL<input type="url" name="url" placeholder="https://..." required /></label><button type="submit">Ajouter le flux</button></form>'
         f'<div class="feed-list">{feeds_html}</div></section></div>'
+        '<section class="settings-grid">'
         '<section class="panel"><h2>Limite de fraicheur</h2><p>Bloque l\'ingestion des journaux plus vieux que X jours par rapport a aujourd\'hui. Laisse vide pour ne fixer aucune limite.</p>'
         f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/retention"))}" class="inline-form"><input type="number" min="1" step="1" name="maxJournalAgeDays" value="{escape_html(config["max_journal_age_days"] or "")}" placeholder="30" /><button type="submit">Enregistrer</button></form></section>'
+        '<section class="panel"><h2>Auto-destruction</h2><p>Supprime automatiquement tout journal plus vieux que X jours. Laisse vide pour desactiver.</p>'
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/auto-delete"))}" class="inline-form"><input type="number" min="1" step="1" name="autoDeleteAfterDays" value="{escape_html(config["auto_delete_after_days"] or "")}" placeholder="90" /><button type="submit">Enregistrer</button></form></section>'
+        "</section>"
+        f'<section class="panel"><h2>PDF enregistres</h2><p>Un bloc par publication. Tu peux supprimer individuellement ou plusieurs d\'un coup.</p>{render_settings_journal_groups(journals, base_path)}</section>'
         '<section class="panel"><h2>Actions</h2><div class="action-row">'
         f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/scan"))}"><button type="submit">Lancer un scan immediat</button></form>'
         f'<form method="post" action="{escape_html(with_base_path(base_path, "/logout"))}"><button type="submit" class="button-secondary">Se deconnecter</button></form></div></section>'
@@ -1485,7 +1682,9 @@ class AppHandler(BaseHTTPRequestHandler):
         path_name, query = parse_query(self.path)
 
         if path_name == "/":
-            self.send_html(200, render_home_page(query, base_path), head_only=head_only)
+            cookies = read_cookies(self)
+            selected_publication = str(query.get("publication", [""])[0] or cookies.get(HOME_FILTER_COOKIE_NAME, "") or "")
+            self.send_html(200, render_home_page(query, base_path, selected_publication), head_only=head_only)
             return
 
         if path_name == "/archives":
@@ -1673,6 +1872,26 @@ class AppHandler(BaseHTTPRequestHandler):
             form = read_form(self)
             set_max_journal_age_days(str(form.get("maxJournalAgeDays") or ""))
             self.redirect(with_base_path(base_path, "/settings?type=success&message=Limite%20de%20fraicheur%20mise%20a%20jour"))
+            return
+
+        if path_name == "/settings/auto-delete":
+            form = read_form(self)
+            set_auto_delete_after_days(str(form.get("autoDeleteAfterDays") or ""))
+            auto_delete_old_journals()
+            self.redirect(with_base_path(base_path, "/settings?type=success&message=Auto-destruction%20mise%20a%20jour"))
+            return
+
+        if path_name == "/settings/journals/delete":
+            form = read_form(self)
+            deleted_count = delete_journals([int(form.get("id") or 0)])
+            self.redirect(with_base_path(base_path, f"/settings?type=success&message={urllib.parse.quote(f'{deleted_count} PDF supprime' if deleted_count == 1 else f'{deleted_count} PDF supprimes')}"))
+            return
+
+        if path_name == "/settings/journals/delete-many":
+            form = read_form_multi(self)
+            deleted_count = delete_journals([int(value) for value in form.get("ids", []) if str(value).isdigit()])
+            message = "Aucun PDF selectionne" if deleted_count == 0 else (f"{deleted_count} PDF supprime" if deleted_count == 1 else f"{deleted_count} PDF supprimes")
+            self.redirect(with_base_path(base_path, f"/settings?type=success&message={urllib.parse.quote(message)}"))
             return
 
         self.send_text(404, "Not Found")
