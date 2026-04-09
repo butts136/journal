@@ -633,6 +633,268 @@ body.catalog-body .section-head a {
   color: #f3b090;
 }
 
+.settings-body .page-shell {
+  width: min(1520px, calc(100% - 2rem));
+}
+
+.settings-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(380px, 0.95fr);
+  gap: 1.2rem;
+  margin-bottom: 1.25rem;
+  padding: 1.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 36px;
+  background:
+    radial-gradient(circle at top left, rgba(242, 155, 114, 0.12), transparent 34%),
+    linear-gradient(180deg, rgba(16, 18, 22, 0.96), rgba(9, 10, 13, 0.98));
+  box-shadow: 0 30px 78px rgba(0, 0, 0, 0.4);
+}
+
+.settings-hero-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.8rem;
+}
+
+.settings-hero-copy h1 {
+  margin: 0;
+  font-size: clamp(2.4rem, 4vw, 4.6rem);
+  line-height: 0.94;
+}
+
+.settings-hero-copy p {
+  margin: 0;
+  max-width: 60ch;
+  color: rgba(243, 238, 230, 0.68);
+}
+
+.settings-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.settings-metric {
+  padding: 1rem 1.05rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+  min-width: 0;
+}
+
+.settings-metric.is-wide {
+  grid-column: span 2;
+}
+
+.settings-metric strong,
+.settings-metric span {
+  display: block;
+}
+
+.settings-metric strong {
+  font-size: 1.25rem;
+  line-height: 1.1;
+  color: #fff6ee;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-metric span {
+  margin-top: 0.22rem;
+  color: rgba(243, 238, 230, 0.58);
+  font-size: 0.83rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.settings-workbench {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.settings-panel {
+  margin-bottom: 0;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(18, 21, 25, 0.96), rgba(10, 12, 15, 0.98));
+  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.28);
+}
+
+.settings-panel-double {
+  grid-column: span 6;
+}
+
+.settings-panel:not(.settings-panel-double):not(.settings-library) {
+  grid-column: span 4;
+}
+
+.settings-library {
+  grid-column: 1 / -1;
+}
+
+.settings-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.settings-panel-head h2 {
+  margin-top: 0.22rem;
+}
+
+.settings-panel-head p {
+  margin: 0;
+  max-width: 32ch;
+  text-align: right;
+  color: rgba(243, 238, 230, 0.6);
+}
+
+.settings-inline-form {
+  align-items: end;
+}
+
+.settings-stack-form {
+  gap: 0.9rem;
+}
+
+.settings-body input[type="text"],
+.settings-body input[type="url"],
+.settings-body input[type="number"],
+.settings-body input[type="password"] {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f4efe8;
+}
+
+.settings-body input::placeholder {
+  color: rgba(243, 238, 230, 0.34);
+}
+
+.settings-list {
+  margin-top: 0.95rem;
+}
+
+.settings-item-card {
+  border-color: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: none;
+}
+
+.settings-item-card button {
+  flex-shrink: 0;
+}
+
+.settings-item-card strong {
+  display: block;
+  margin-bottom: 0.16rem;
+}
+
+.settings-item-card span {
+  color: rgba(243, 238, 230, 0.62);
+}
+
+.settings-action-row {
+  justify-content: flex-start;
+  gap: 0.8rem;
+}
+
+.journal-admin-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.4rem;
+}
+
+.journal-admin-bulk,
+.journal-admin-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.journal-admin-count {
+  color: rgba(243, 238, 230, 0.7);
+  font-size: 0.88rem;
+}
+
+.journal-admin-group {
+  border-color: rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.012));
+}
+
+.journal-admin-group[open] {
+  box-shadow: inset 0 0 0 1px rgba(242, 155, 114, 0.04);
+}
+
+.journal-admin-summary strong,
+.journal-admin-summary small {
+  display: block;
+}
+
+.journal-admin-summary small {
+  margin-top: 0.2rem;
+  color: rgba(243, 238, 230, 0.56);
+}
+
+.journal-admin-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(243, 238, 230, 0.72);
+  font-size: 1rem;
+  transition: transform 160ms ease;
+}
+
+.journal-admin-group[open] .journal-admin-caret {
+  transform: rotate(45deg);
+}
+
+.journal-admin-group-tools {
+  display: flex;
+  gap: 0.55rem;
+  padding: 0 1.1rem 0.95rem;
+}
+
+.journal-admin-row {
+  gap: 0.9rem;
+  padding: 0.9rem 1.1rem;
+}
+
+.journal-admin-row:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.journal-admin-select {
+  width: 1.4rem;
+}
+
+.journal-admin-link strong {
+  font-size: 0.95rem;
+}
+
+.journal-admin-link span {
+  margin-top: 0.18rem;
+}
+
+.danger-button {
+  background: rgba(185, 69, 45, 0.12);
+  border-color: rgba(242, 155, 114, 0.12);
+}
+
+.danger-button:hover {
+  background: rgba(185, 69, 45, 0.2);
+}
+
 .back-link {
   color: var(--brand);
   white-space: nowrap;
@@ -914,11 +1176,40 @@ body.catalog-body .section-head a {
     grid-template-columns: 1fr;
   }
 
+  .settings-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .settings-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-panel,
+  .settings-panel-double,
+  .settings-library {
+    grid-column: auto;
+  }
+
   .topbar,
   .section-head,
   .action-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .settings-panel-head,
+  .journal-admin-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .settings-panel-head p {
+    text-align: left;
+    max-width: none;
   }
 
   .inline-form {
@@ -931,6 +1222,19 @@ body.catalog-body .section-head a {
 
   .journal-card {
     width: 160px;
+  }
+
+  .journal-admin-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .journal-admin-row .danger-button {
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  .journal-admin-group-tools {
+    flex-wrap: wrap;
   }
 
   .reader-screen {
