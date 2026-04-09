@@ -1,5 +1,5 @@
 (function () {
-  const root = document.querySelector(".settings-library");
+  const root = document.querySelector(".settings-library-card");
 
   if (!root) {
     return;

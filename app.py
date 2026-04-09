@@ -1349,21 +1349,21 @@ def render_settings_journal_groups(journals: list[dict], base_path: str) -> str:
             journal_id = int(journal["id"])
             journal_href = with_base_path(base_path, f"/reader/{journal_id}")
             rows.append(
-                f'<div class="journal-admin-row">'
-                f'<label class="journal-admin-select"><input type="checkbox" name="ids" value="{journal_id}" data-group-key="{escape_html(group_key)}" /><span></span></label>'
-                f'<a class="journal-admin-link" href="{escape_html(journal_href)}"><strong>{escape_html(journal["display_title"])}</strong><span>{escape_html(format_bytes(journal.get("file_size")))} · {escape_html(journal.get("status") or "")}</span></a>'
+                f'<div class="library-row">'
+                f'<label class="library-row-check"><input type="checkbox" name="ids" value="{journal_id}" data-group-key="{escape_html(group_key)}" /><span></span></label>'
+                f'<a class="library-row-link" href="{escape_html(journal_href)}"><strong>{escape_html(journal["display_title"])}</strong><span>{escape_html(format_bytes(journal.get("file_size")))} · {escape_html(journal.get("status") or "")}</span></a>'
                 f'<button type="submit" class="danger-button" aria-label="Supprimer" formaction="{escape_html(with_base_path(base_path, "/settings/journals/delete"))}" formmethod="post" name="id" value="{journal_id}">×</button>'
                 "</div>"
             )
         blocks.append(
-            f'<details class="journal-admin-group" open><summary><span class="journal-admin-summary"><strong>{escape_html(publication_name)}</strong><small>{len(items)} PDF</small></span><span class="journal-admin-caret">+</span></summary>'
-            f'<div class="journal-admin-group-tools"><button type="button" class="button-secondary compact-button" data-select-group="{escape_html(group_key)}">Tout selectionner</button><button type="button" class="button-secondary compact-button" data-clear-group="{escape_html(group_key)}">Effacer</button></div>'
+            f'<details class="library-group" open><summary class="library-group-summary"><span class="library-group-title"><strong>{escape_html(publication_name)}</strong><small>{len(items)} PDF</small></span><span class="library-group-caret"></span></summary>'
+            f'<div class="library-group-actions"><button type="button" class="button-secondary compact-button" data-select-group="{escape_html(group_key)}">Tout selectionner</button><button type="button" class="button-secondary compact-button" data-clear-group="{escape_html(group_key)}">Effacer</button></div>'
             f'{"".join(rows)}</details>'
         )
 
     return (
-        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/journals/delete-many"))}" class="journal-admin-form">'
-        '<div class="journal-admin-toolbar"><div class="journal-admin-bulk"><button type="button" class="button-secondary compact-button" data-select-all-journals>Tout selectionner</button><button type="button" class="button-secondary compact-button" data-clear-all-journals>Tout effacer</button></div><div class="journal-admin-actions"><span class="journal-admin-count" data-selected-count>0 selection</span><button type="submit" class="danger-button large-danger">Supprimer la selection</button></div></div>'
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/journals/delete-many"))}" class="library-form">'
+        '<div class="library-toolbar"><div class="library-toolbar-left"><button type="button" class="button-secondary compact-button" data-select-all-journals>Tout selectionner</button><button type="button" class="button-secondary compact-button" data-clear-all-journals>Tout effacer</button></div><div class="library-toolbar-right"><span class="library-selection-count" data-selected-count>0 selection</span><button type="submit" class="danger-button large-danger">Supprimer la selection</button></div></div>'
         f'{"".join(blocks)}</form>'
     )
 
@@ -1421,40 +1421,45 @@ def render_settings_page(handler: BaseHTTPRequestHandler, query: dict, base_path
     feeds = get_all_feeds()
     journals = get_all_journals()
     terms_html = "".join(
-        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms/delete"))}" class="chip-form settings-item-card"><input type="hidden" name="id" value="{term["id"]}" /><span>{escape_html(term["label"])}</span><button type="submit" class="button-secondary compact-button">Supprimer</button></form>'
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms/delete"))}" class="settings-list-item"><input type="hidden" name="id" value="{term["id"]}" /><div><strong>{escape_html(term["label"])}</strong><span>Correspondance accent-insensible</span></div><button type="submit" class="button-secondary compact-button">Supprimer</button></form>'
         for term in terms
     ) or '<p class="muted">Aucun terme.</p>'
     feeds_html = "".join(
-        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/feeds/delete"))}" class="feed-item settings-item-card"><input type="hidden" name="id" value="{feed["id"]}" /><div><strong>{escape_html(feed["name"])}</strong><span>{escape_html(feed["url"])}</span></div><button type="submit" class="button-secondary compact-button">Supprimer</button></form>'
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/feeds/delete"))}" class="settings-list-item settings-feed-item"><input type="hidden" name="id" value="{feed["id"]}" /><div><strong>{escape_html(feed["name"])}</strong><span>{escape_html(feed["url"])}</span></div><button type="submit" class="button-secondary compact-button">Supprimer</button></form>'
         for feed in feeds
     ) or '<p class="muted">Aucun flux.</p>'
     body = (
-        '<section class="settings-hero"><div class="settings-hero-copy"><span class="eyebrow">Administration</span><h1>Pilotage du kiosque</h1>'
-        '<p>Flux, termes, retention et bibliotheque PDF dans une seule vue. Les accents sont ignores pendant la recherche.</p></div>'
-        '<div class="settings-metrics">'
-        f'<article class="settings-metric"><strong>{snapshot["readyCount"]}</strong><span>PDF prets</span></article>'
-        f'<article class="settings-metric"><strong>{snapshot["downloadingCount"]}</strong><span>Telechargements</span></article>'
-        f'<article class="settings-metric"><strong>{len(terms)}</strong><span>Termes actifs</span></article>'
-        f'<article class="settings-metric"><strong>{len(feeds)}</strong><span>Flux RSS</span></article>'
-        f'<article class="settings-metric is-wide"><strong>{"Oui" if snapshot["scanRunning"] else "Non"}</strong><span>Scan actif</span></article>'
-        f'<article class="settings-metric is-wide"><strong>{escape_html(snapshot["lastError"] or "Aucune")}</strong><span>Derniere erreur</span></article></div></section>'
+        '<section class="settings-page">'
+        '<header class="settings-header-card">'
+        '<div class="settings-header-copy"><span class="eyebrow">Administration</span><h1>Parametres du kiosque</h1><p>Flux RSS, termes, politiques de retention et bibliotheque PDF dans une vue claire et compacte.</p></div>'
+        '<div class="settings-stats">'
+        f'<article class="settings-stat-card"><strong>{snapshot["readyCount"]}</strong><span>PDF prets</span></article>'
+        f'<article class="settings-stat-card"><strong>{snapshot["downloadingCount"]}</strong><span>Telechargements</span></article>'
+        f'<article class="settings-stat-card"><strong>{len(terms)}</strong><span>Termes</span></article>'
+        f'<article class="settings-stat-card"><strong>{len(feeds)}</strong><span>Flux</span></article>'
+        f'<article class="settings-stat-card is-wide"><strong>{"Oui" if snapshot["scanRunning"] else "Non"}</strong><span>Scan actif</span></article>'
+        f'<article class="settings-stat-card is-wide"><strong>{escape_html(snapshot["lastError"] or "Aucune")}</strong><span>Derniere erreur</span></article>'
+        "</div></header>"
         f"{get_flash(query)}"
-        '<div class="settings-workbench">'
-        '<section class="panel settings-panel settings-panel-double"><div class="settings-panel-head"><div><span class="eyebrow">Recherche</span><h2>Termes suivis</h2></div><p class="muted">Un nouveau terme declenche un prochain scan profond sur 30 jours.</p></div>'
-        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms"))}" class="inline-form settings-inline-form"><input type="text" name="label" placeholder="Journal de Montreal" required /><button type="submit">Ajouter</button></form>'
-        f'<div class="chip-list settings-list">{terms_html}</div></section>'
-        '<section class="panel settings-panel settings-panel-double"><div class="settings-panel-head"><div><span class="eyebrow">Ingestion</span><h2>Flux RSS / Torznab</h2></div><p class="muted">Un ou plusieurs indexeurs. Le nom sert seulement a l\'identification.</p></div>'
-        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/feeds"))}" class="stack-form settings-stack-form"><label>Nom<input type="text" name="name" placeholder="Prowlarr #1" required /></label><label>URL<input type="url" name="url" placeholder="https://..." required /></label><button type="submit">Ajouter le flux</button></form>'
-        f'<div class="feed-list settings-list">{feeds_html}</div></section>'
-        '<section class="panel settings-panel"><div class="settings-panel-head"><div><span class="eyebrow">Regles</span><h2>Limite de fraicheur</h2></div><p class="muted">Bloque l\'ingestion au-dela de X jours.</p></div>'
-        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/retention"))}" class="inline-form settings-inline-form"><input type="number" min="1" step="1" name="maxJournalAgeDays" value="{escape_html(config["max_journal_age_days"] or "")}" placeholder="30" /><button type="submit">Enregistrer</button></form></section>'
-        '<section class="panel settings-panel"><div class="settings-panel-head"><div><span class="eyebrow">Nettoyage</span><h2>Auto-destruction</h2></div><p class="muted">Supprime automatiquement les journaux plus vieux que X jours.</p></div>'
-        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/auto-delete"))}" class="inline-form settings-inline-form"><input type="number" min="1" step="1" name="autoDeleteAfterDays" value="{escape_html(config["auto_delete_after_days"] or "")}" placeholder="90" /><button type="submit">Enregistrer</button></form></section>'
-        '<section class="panel settings-panel settings-panel-actions"><div class="settings-panel-head"><div><span class="eyebrow">Maintenance</span><h2>Actions rapides</h2></div><p class="muted">Lancer une verification immediate ou fermer la session admin.</p></div><div class="action-row settings-action-row">'
+        '<div class="settings-layout">'
+        '<main class="settings-main">'
+        '<section class="settings-card"><div class="settings-card-head"><div><span class="eyebrow">Recherche</span><h2>Termes suivis</h2></div><p>Un nouveau terme declenche un prochain scan profond sur 30 jours.</p></div>'
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms"))}" class="settings-form-inline"><input type="text" name="label" placeholder="Journal de Montreal" required /><button type="submit">Ajouter</button></form>'
+        f'<div class="settings-list">{terms_html}</div></section>'
+        '<section class="settings-card"><div class="settings-card-head"><div><span class="eyebrow">Ingestion</span><h2>Flux RSS / Torznab</h2></div><p>Ajoute ou retire les indexeurs surveilles.</p></div>'
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/feeds"))}" class="settings-form-stack"><label>Nom<input type="text" name="name" placeholder="Prowlarr #1" required /></label><label>URL<input type="url" name="url" placeholder="https://..." required /></label><button type="submit">Ajouter le flux</button></form>'
+        f'<div class="settings-list">{feeds_html}</div></section>'
+        f'<section class="settings-card settings-library-card"><div class="settings-card-head"><div><span class="eyebrow">Bibliotheque</span><h2>PDF enregistres</h2></div><p>Une section repliable par publication. Suppression simple ou multiple.</p></div>{render_settings_journal_groups(journals, base_path)}</section>'
+        "</main>"
+        '<aside class="settings-sidebar">'
+        '<section class="settings-card"><div class="settings-card-head"><div><span class="eyebrow">Regles</span><h2>Limite de fraicheur</h2></div><p>Bloque l\'ingestion au-dela de X jours.</p></div>'
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/retention"))}" class="settings-form-inline"><input type="number" min="1" step="1" name="maxJournalAgeDays" value="{escape_html(config["max_journal_age_days"] or "")}" placeholder="30" /><button type="submit">Enregistrer</button></form></section>'
+        '<section class="settings-card"><div class="settings-card-head"><div><span class="eyebrow">Nettoyage</span><h2>Auto-destruction</h2></div><p>Supprime automatiquement les journaux plus vieux que X jours.</p></div>'
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/auto-delete"))}" class="settings-form-inline"><input type="number" min="1" step="1" name="autoDeleteAfterDays" value="{escape_html(config["auto_delete_after_days"] or "")}" placeholder="90" /><button type="submit">Enregistrer</button></form></section>'
+        '<section class="settings-card"><div class="settings-card-head"><div><span class="eyebrow">Maintenance</span><h2>Actions rapides</h2></div><p>Verification immediate ou fermeture de session.</p></div><div class="settings-action-stack">'
         f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/scan"))}"><button type="submit">Lancer un scan immediat</button></form>'
         f'<form method="post" action="{escape_html(with_base_path(base_path, "/logout"))}"><button type="submit" class="button-secondary">Se deconnecter</button></form></div></section>'
-        f'<section class="panel settings-panel settings-library"><div class="settings-panel-head"><div><span class="eyebrow">Bibliotheque</span><h2>PDF enregistres</h2></div><p class="muted">Chaque publication est repliee. Suppression simple ou multiple.</p></div>{render_settings_journal_groups(journals, base_path)}</section>'
-        "</div>"
+        "</aside></div></section>"
     )
     return render_shell("Parametres", body, current_path="/settings", scripts=["/static/settings.js"], body_class="catalog-body settings-body", base_path=base_path)
 
