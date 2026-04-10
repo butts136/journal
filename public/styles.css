@@ -1667,6 +1667,126 @@ body.catalog-body .section-head a {
   transform: translateY(6px) scale(0.985);
 }
 
+.library-card,
+.rules-card,
+.cleanup-card,
+.maintenance-card {
+  position: relative;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+
+.library-card::before,
+.rules-card::before,
+.cleanup-card::before,
+.maintenance-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.06) 50%, transparent 100%);
+  transform: translateX(-120%);
+  animation: settings-card-shine 5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.library-content,
+.rules-content,
+.cleanup-content,
+.maintenance-content {
+  position: relative;
+  z-index: 1;
+}
+
+.library-header,
+.rules-header,
+.cleanup-header,
+.maintenance-header {
+  margin-bottom: 14px;
+}
+
+.library-title,
+.rules-title,
+.cleanup-title,
+.maintenance-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.library-title-dot,
+.rules-title-dot,
+.cleanup-title-dot,
+.maintenance-title-dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #60a5fa;
+  box-shadow: 0 0 12px rgba(96, 165, 250, 0.22);
+}
+
+.library-subtitle,
+.rules-subtitle,
+.cleanup-subtitle,
+.maintenance-subtitle {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: rgba(158, 176, 201, 0.96);
+}
+
+.rules-form,
+.cleanup-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.rules-input,
+.cleanup-input {
+  width: 100%;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  padding: 0 14px;
+  color: #e8eef9;
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.22s ease, box-shadow 0.22s ease, background 0.22s ease;
+}
+
+.rules-input::placeholder,
+.cleanup-input::placeholder {
+  color: rgba(158, 176, 201, 0.78);
+}
+
+.rules-input:focus,
+.cleanup-input:focus {
+  border-color: rgba(96, 165, 250, 0.45);
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.12);
+}
+
+.maintenance-actions {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.maintenance-actions form,
+.maintenance-actions button {
+  width: 100%;
+}
+
 @keyframes terms-shine {
   0% {
     transform: translateX(-120%);
@@ -1682,6 +1802,20 @@ body.catalog-body .section-head a {
 }
 
 @keyframes feeds-shine {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  20% {
+    transform: translateX(120%);
+  }
+
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes settings-card-shine {
   0% {
     transform: translateX(-120%);
   }
@@ -1817,25 +1951,6 @@ body.catalog-body .section-head a {
   padding: 1.2rem;
 }
 
-.settings-card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: flex-start;
-  margin-bottom: 0.9rem;
-}
-
-.settings-card-head h2 {
-  margin: 0.2rem 0 0;
-}
-
-.settings-card-head p {
-  margin: 0;
-  max-width: 30ch;
-  text-align: right;
-  color: rgba(243, 238, 230, 0.6);
-}
-
 .settings-form-inline,
 .settings-form-stack,
 .settings-list {
@@ -1890,10 +2005,6 @@ body.catalog-body .section-head a {
 .settings-action-stack form,
 .settings-action-stack button {
   width: 100%;
-}
-
-.settings-library-card {
-  overflow: hidden;
 }
 
 .library-form {
@@ -2030,21 +2141,11 @@ body.catalog-body .section-head a {
     grid-template-columns: 1fr;
   }
 
-  .settings-card-head,
   .library-toolbar,
   .library-toolbar-left,
   .library-toolbar-right {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .settings-card-head p {
-    max-width: none;
-    text-align: left;
-  }
-
-  .settings-form-inline {
-    grid-template-columns: 1fr;
   }
 
   .feeds-form {
@@ -2061,6 +2162,15 @@ body.catalog-body .section-head a {
   .library-row .danger-button {
     grid-column: 2;
     justify-self: end;
+  }
+
+  .rules-form,
+  .cleanup-form {
+    grid-template-columns: 1fr;
+  }
+
+  .maintenance-actions {
+    grid-template-columns: 1fr;
   }
 
   .terms-add-row,
