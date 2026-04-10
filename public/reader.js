@@ -25,10 +25,7 @@
   const VISIBLE_MARGIN = 720;
   const RETAIN_MARGIN = 1800;
   const MAX_CONCURRENT_RENDERS = 1;
-  const QUALITY_SCALE = Math.min(
-    Math.max(window.devicePixelRatio || 1, 1.25),
-    window.devicePixelRatio && window.devicePixelRatio > 2 ? 2 : 1.8,
-  );
+  const QUALITY_SCALE = Math.min(Math.max(window.devicePixelRatio || 1, 1.6), 3);
 
   let currentMode = "spread";
   let pdfDocument = null;
@@ -37,12 +34,14 @@
   let offsetX = 0;
   let offsetY = 0;
   let dragState = null;
+  let pinchState = null;
   let hasCompletedInitialRender = false;
   let resizeTimer = null;
   let pageEntries = [];
   let renderQueue = [];
   let scheduledVisibilityPass = 0;
   let activeRenders = 0;
+  const activePointers = new Map();
 
   function readCookie(name) {
     const entries = document.cookie ? document.cookie.split(/;\s*/) : [];
@@ -75,6 +74,10 @@
 
     const readyCount = pageEntries.filter((entry) => entry.rendered).length;
     setStatus(`${pdfDocument.numPages} pages · ${Math.round(zoom * 100)}% · ${readyCount} chargees`);
+  }
+
+  function getDesiredRenderMultiplier() {
+    return QUALITY_SCALE * Math.max(1, zoom);
   }
 
   function updateModeButton() {
@@ -252,14 +255,16 @@
   }
 
   async function renderEntry(entry, version) {
-    if (!pdfDocument || version !== renderVersion || entry.rendered || entry.rendering) {
+    if (!pdfDocument || version !== renderVersion || entry.rendering || (entry.rendered && !entry.needsRerender)) {
       return;
     }
 
     entry.rendering = true;
+    entry.needsRerender = false;
     activeRenders += 1;
 
     try {
+      const desiredRenderMultiplier = getDesiredRenderMultiplier();
       const page = entry.page || (await pdfDocument.getPage(entry.pageNumber));
       entry.page = page;
 
@@ -267,7 +272,7 @@
         return;
       }
 
-      const renderViewport = page.getViewport({ scale: entry.displayScale * QUALITY_SCALE });
+      const renderViewport = page.getViewport({ scale: entry.displayScale * desiredRenderMultiplier });
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d", { alpha: false });
 
@@ -280,17 +285,20 @@
       canvas.style.width = `${Math.ceil(entry.displayWidth)}px`;
       canvas.style.height = `${Math.ceil(entry.displayHeight)}px`;
 
-      entry.wrapper.textContent = "";
-      entry.wrapper.appendChild(canvas);
-      entry.wrapper.classList.remove("is-placeholder");
-
       await page.render({
         canvasContext: context,
         viewport: renderViewport,
       }).promise;
 
+      if (version !== renderVersion) {
+        return;
+      }
+
+      entry.wrapper.replaceChildren(canvas);
+      entry.wrapper.classList.remove("is-placeholder");
       entry.canvas = canvas;
       entry.rendered = true;
+      entry.renderScaleFactor = desiredRenderMultiplier;
       updateStatus();
     } finally {
       entry.rendering = false;
@@ -305,6 +313,7 @@
     }
 
     entry.rendered = false;
+    entry.needsRerender = false;
     entry.canvas = null;
     entry.wrapper.textContent = "";
     entry.wrapper.appendChild(createPlaceholder(entry));
@@ -343,9 +352,13 @@
 
     const version = renderVersion;
     const visibleEntries = [];
+    const desiredRenderMultiplier = getDesiredRenderMultiplier();
 
     pageEntries.forEach((entry) => {
       if (isEntryNearViewport(entry, VISIBLE_MARGIN)) {
+        if (entry.rendered && Math.abs((entry.renderScaleFactor || 0) - desiredRenderMultiplier) > 0.08) {
+          entry.needsRerender = true;
+        }
         visibleEntries.push(entry);
       } else if (!isEntryNearViewport(entry, RETAIN_MARGIN)) {
         releaseEntry(entry);
@@ -353,7 +366,7 @@
     });
 
     visibleEntries.sort((left, right) => getViewportDistance(left) - getViewportDistance(right));
-    renderQueue = visibleEntries.filter((entry) => !entry.rendered && !entry.rendering);
+    renderQueue = visibleEntries.filter((entry) => !entry.rendering && (!entry.rendered || entry.needsRerender));
     processRenderQueue(version);
     updateStatus();
   }
@@ -370,17 +383,19 @@
 
     const displayScale = getBaseDisplayScale(page);
     const displayViewport = page.getViewport({ scale: displayScale });
-    const entry = {
-      pageNumber,
-      page,
-      displayScale,
-      displayWidth: Math.ceil(displayViewport.width),
-      displayHeight: Math.ceil(displayViewport.height),
-      wrapper: createSheet(pageNumber),
-      canvas: null,
-      rendered: false,
-      rendering: false,
-    };
+      const entry = {
+        pageNumber,
+        page,
+        displayScale,
+        displayWidth: Math.ceil(displayViewport.width),
+        displayHeight: Math.ceil(displayViewport.height),
+        wrapper: createSheet(pageNumber),
+        canvas: null,
+        rendered: false,
+        rendering: false,
+        needsRerender: false,
+        renderScaleFactor: 0,
+      };
 
     entry.wrapper.style.width = `${entry.displayWidth}px`;
     entry.wrapper.style.height = `${entry.displayHeight}px`;
@@ -545,31 +560,94 @@
       return;
     }
 
-    dragState = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: offsetX,
-      originY: offsetY,
-    };
+    event.preventDefault();
+    activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
-    viewportNode.classList.add("is-dragging");
-    viewportNode.setPointerCapture(event.pointerId);
-  });
-
-  viewportNode.addEventListener("pointermove", (event) => {
-    if (!dragState || dragState.pointerId !== event.pointerId) {
+    if (activePointers.size === 1) {
+      dragState = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: offsetX,
+        originY: offsetY,
+      };
+      viewportNode.classList.add("is-dragging");
+      viewportNode.setPointerCapture(event.pointerId);
       return;
     }
 
+    if (activePointers.size === 2) {
+      viewportNode.setPointerCapture(event.pointerId);
+      const points = Array.from(activePointers.values());
+      const startDistance = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) || 1;
+      const startCenterX = (points[0].x + points[1].x) / 2;
+      const startCenterY = (points[0].y + points[1].y) / 2;
+      pinchState = {
+        startDistance,
+        startZoom: zoom,
+        startCenterX,
+        startCenterY,
+      };
+      dragState = null;
+      viewportNode.classList.add("is-dragging");
+    }
+  });
+
+  viewportNode.addEventListener("pointermove", (event) => {
+    if (!pdfDocument) {
+      return;
+    }
+
+    if (!activePointers.has(event.pointerId)) {
+      return;
+    }
+
+    activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (pinchState && activePointers.size >= 2) {
+      event.preventDefault();
+      const points = Array.from(activePointers.values());
+      const distance = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) || 1;
+      const centerX = (points[0].x + points[1].x) / 2;
+      const centerY = (points[0].y + points[1].y) / 2;
+      changeZoom(pinchState.startZoom * (distance / pinchState.startDistance), centerX, centerY);
+      return;
+    }
+
+    if (!dragState || dragState.pointerId !== event.pointerId || activePointers.size !== 1) {
+      return;
+    }
+
+    event.preventDefault();
     offsetX = dragState.originX + (event.clientX - dragState.startX);
     offsetY = dragState.originY + (event.clientY - dragState.startY);
     applyPanZoom();
   });
 
   function stopDrag(event) {
-    if (!dragState || (event && dragState.pointerId !== event.pointerId)) {
+    if (!event || !activePointers.has(event.pointerId)) {
       return;
+    }
+
+    activePointers.delete(event.pointerId);
+
+    if (activePointers.size < 2) {
+      pinchState = null;
+    }
+
+    if (activePointers.size === 1) {
+      const remaining = Array.from(activePointers.entries())[0];
+      if (remaining) {
+        dragState = {
+          pointerId: remaining[0],
+          startX: remaining[1].x,
+          startY: remaining[1].y,
+          originX: offsetX,
+          originY: offsetY,
+        };
+        viewportNode.classList.add("is-dragging");
+        return;
+      }
     }
 
     dragState = null;
@@ -587,13 +665,13 @@
         return;
       }
 
-      if (event.ctrlKey) {
-        event.preventDefault();
-        changeZoom(zoom * (event.deltaY < 0 ? 1.05 : 1 / 1.05), event.clientX, event.clientY);
-        return;
-      }
-
+    if (event.ctrlKey) {
       event.preventDefault();
+      changeZoom(zoom * (event.deltaY < 0 ? 1.05 : 1 / 1.05), event.clientX, event.clientY);
+      return;
+    }
+
+    event.preventDefault();
 
       if (currentMode === "horizontal") {
         moveBy(-(event.deltaY + event.deltaX), 0);
@@ -673,9 +751,11 @@
       setStatus("Ouverture du PDF...");
       pdfDocument = await window.pdfjsLib.getDocument({
         url: pdfUrl,
-        rangeChunkSize: 262144,
+        rangeChunkSize: 131072,
         disableAutoFetch: false,
         disableStream: false,
+        maxImageSize: -1,
+        isOffscreenCanvasSupported: true,
         useSystemFonts: true,
       }).promise;
 

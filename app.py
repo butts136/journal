@@ -1602,7 +1602,7 @@ def render_reader_page(journal: dict, base_path: str) -> str:
       </main>
     </div>
     <script src="{PDFJS_URL}"></script>
-    <script src="{escape_html(with_base_path(base_path, "/static/reader.js?v=10"))}"></script>
+<script src="{escape_html(with_base_path(base_path, "/static/reader.js?v=11"))}"></script>
   </body>
 </html>"""
 
