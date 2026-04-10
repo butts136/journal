@@ -257,6 +257,7 @@ def initialize_database(connection: sqlite3.Connection) -> None:
           label TEXT NOT NULL UNIQUE,
           normalized_label TEXT NOT NULL UNIQUE,
           is_enabled INTEGER NOT NULL DEFAULT 1,
+          is_featured INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
@@ -307,6 +308,10 @@ def initialize_database(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE app_config ADD COLUMN search_terms_revision INTEGER NOT NULL DEFAULT 0")
     if not any(column["name"] == "last_deep_scan_revision" for column in columns):
         connection.execute("ALTER TABLE app_config ADD COLUMN last_deep_scan_revision INTEGER")
+
+    term_columns = connection.execute("PRAGMA table_info(search_terms)").fetchall()
+    if not any(column["name"] == "is_featured" for column in term_columns):
+        connection.execute("ALTER TABLE search_terms ADD COLUMN is_featured INTEGER NOT NULL DEFAULT 0")
 
     connection.commit()
 
@@ -441,6 +446,11 @@ def get_all_search_terms() -> list[dict]:
     return [dict(row) for row in query_all("SELECT * FROM search_terms ORDER BY created_at ASC, id ASC")]
 
 
+def get_featured_search_term() -> Optional[dict]:
+    row = query_one("SELECT * FROM search_terms WHERE is_enabled = 1 AND is_featured = 1 ORDER BY id DESC LIMIT 1")
+    return dict(row) if row else None
+
+
 def add_search_term(label: str) -> None:
     clean_label = str(label or "").strip()
     normalized = normalize_text(clean_label)
@@ -455,12 +465,46 @@ def add_search_term(label: str) -> None:
             bump_search_terms_revision()
 
 
+def toggle_featured_search_term(term_id: int) -> None:
+    term = query_one("SELECT id, is_featured FROM search_terms WHERE id = ? LIMIT 1", (term_id,))
+    if not term:
+        return
+    if int(term["is_featured"] or 0):
+        execute(
+            "UPDATE search_terms SET is_featured = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (term_id,),
+        )
+        return
+    execute("UPDATE search_terms SET is_featured = 0 WHERE is_featured = 1")
+    execute(
+        "UPDATE search_terms SET is_featured = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (term_id,),
+    )
+
+
 def remove_search_term(term_id: int) -> None:
     before = query_one("SELECT COUNT(*) AS count FROM search_terms")["count"]
     execute("DELETE FROM search_terms WHERE id = ?", (term_id,))
     after = query_one("SELECT COUNT(*) AS count FROM search_terms")["count"]
     if after < before:
         bump_search_terms_revision()
+
+
+def get_latest_ready_journal_for_publication(publication_name: str) -> Optional[dict]:
+    clean_name = str(publication_name or "").strip()
+    if not clean_name:
+        return None
+    publication_key = slugify(clean_name)
+    rows = query_all(
+        """
+        SELECT *
+        FROM journals
+        WHERE status = 'ready' AND (publication_key = ? OR publication_name = ?)
+        ORDER BY publication_date DESC, id DESC
+        """,
+        (publication_key, clean_name),
+    )
+    return dict(rows[0]) if rows else None
 
 
 def create_journal_if_missing(payload: dict) -> dict:
@@ -1222,7 +1266,6 @@ def render_shell(title: str, body: str, current_path: str = "/", scripts: Option
         </a>
         <nav class="nav">
           <a class="{"is-active" if current_path == "/" else ""}" href="{escape_html(with_base_path(base_path, "/"))}">Accueil</a>
-          <a class="{"is-active" if current_path == "/archives" else ""}" href="{escape_html(with_base_path(base_path, "/archives"))}">Archives</a>
           <a class="{"is-active" if current_path in ("/settings", "/setup") else ""}" href="{escape_html(settings_href)}">Parametres</a>
         </nav>
       </header>
@@ -1286,7 +1329,10 @@ def render_home_page(query: dict, base_path: str, selected_publication: str = ""
         if not selected_publication or journal.get("publication_name") == selected_publication
     ]
     highlighted_ids = {int(journal["id"]) for journal in recent_journals if is_current_highlight(journal)}
-    featured = recent_journals[0] if recent_journals else (all_recent_journals[0] if all_recent_journals else None)
+    featured_term = get_featured_search_term()
+    featured = get_latest_ready_journal_for_publication(featured_term["label"]) if featured_term else None
+    if not featured:
+        featured = recent_journals[0] if recent_journals else (all_recent_journals[0] if all_recent_journals else None)
     featured_block = ""
 
     if featured:
@@ -1299,7 +1345,7 @@ def render_home_page(query: dict, base_path: str, selected_publication: str = ""
             f'<h1>{escape_html(featured["display_title"])}</h1>'
             f'<p>{escape_html(format_french_date(featured_date) if featured_date else featured.get("publication_date", ""))}</p>'
             f'<div class="home-feature-actions"><a class="button-secondary" href="{escape_html(featured_reader_href)}">Ouvrir le journal</a>'
-            f'<a class="button-secondary" href="{escape_html(with_base_path(base_path, "/archives"))}">Parcourir les archives</a></div>'
+            '<a class="button-secondary" href="#archives">Voir l\'historique</a></div>'
             '</div>'
             f'<div class="home-feature-card">{render_journal_card(featured, base_path, True)}</div>'
             "</section>"
@@ -1310,8 +1356,9 @@ def render_home_page(query: dict, base_path: str, selected_publication: str = ""
         f"{featured_block}"
         f"{render_filter_badges(base_path, publications, selected_publication)}"
         '<section class="section-head"><h2>Dernieres editions</h2>'
-        f'<a href="{escape_html(with_base_path(base_path, "/archives"))}">Voir les archives</a></section>'
+        '<span>Les 30 plus recentes</span></section>'
         f"{render_journal_grid(recent_journals, base_path, highlighted_ids)}"
+        f"{render_home_archives(base_path, selected_publication)}"
     )
     return render_shell("Accueil", body, current_path="/", scripts=[PDFJS_URL, "/static/app.js"], body_class="catalog-body", base_path=base_path)
 
@@ -1326,6 +1373,45 @@ def group_archived_journals(journals: list[dict]) -> list[tuple[str, list[tuple[
         month_label = get_archive_label(journal_date)
         groups.setdefault(year, {}).setdefault(month_label, []).append(journal)
     return [(year, list(groups[year].items())) for year in sorted(groups.keys(), key=lambda value: int(value), reverse=True)]
+
+
+def group_archived_journals_by_month(journals: list[dict]) -> list[tuple[int, int, list[dict]]]:
+    groups: dict[tuple[int, int], list[dict]] = {}
+    for journal in journals:
+        journal_date = parse_date_key(journal.get("publication_date"))
+        if not journal_date:
+            continue
+        key = (journal_date.year, journal_date.month)
+        groups.setdefault(key, []).append(journal)
+    return [
+        (year, month, groups[(year, month)])
+        for year, month in sorted(groups.keys(), key=lambda value: (value[0], value[1]), reverse=True)
+    ]
+
+
+def render_home_archives(base_path: str, selected_publication: str = "") -> str:
+    archived_journals = get_archived_journals()
+    if selected_publication:
+        archived_journals = [journal for journal in archived_journals if journal.get("publication_name") == selected_publication]
+
+    blocks = []
+    for year, month, items in group_archived_journals_by_month(archived_journals):
+        label = f"{year} - {MONTH_NAMES[month - 1]}"
+        blocks.append(
+            f'<details class="archive-group"><summary class="archive-group-summary"><span class="archive-group-title">{escape_html(label)}</span><span class="archive-group-count">{len(items)} PDF</span></summary>'
+            f'<div class="archive-group-body">{render_journal_grid(items, base_path)}</div></details>'
+        )
+
+    if not blocks:
+        return ""
+
+    return (
+        '<section class="home-archives" id="archives">'
+        '<div class="section-head section-head-compact"><h2>Archives</h2><span>Sections repliees par mois</span></div>'
+        f'{"".join(blocks)}'
+        '<div class="archive-end">Fin</div>'
+        '</section>'
+    )
 
 
 def group_journals_by_publication(journals: list[dict]) -> list[tuple[str, list[dict]]]:
@@ -1418,16 +1504,28 @@ def render_settings_page(handler: BaseHTTPRequestHandler, query: dict, base_path
     snapshot = get_status_snapshot()
     config = get_app_config()
     terms = get_all_search_terms()
+    featured_term = get_featured_search_term()
+    featured_term_id = int(featured_term["id"]) if featured_term else None
     feeds = get_all_feeds()
     journals = get_all_journals()
     scan_status = "Oui" if snapshot["scanRunning"] else "Non"
     scan_status_class = "success" if snapshot["scanRunning"] else "warning"
     last_error = snapshot["lastError"] or "Aucune"
     error_status_class = "success" if last_error == "Aucune" else "danger"
-    terms_html = "".join(
-        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms/delete"))}" class="term-item"><input type="hidden" name="id" value="{term["id"]}" /><div class="term-left"><span class="term-dot"></span><div class="term-name" title="{escape_html(term["label"])}">{escape_html(term["label"])}</div></div><button type="submit" class="btn btn-delete">Supprimer</button></form>'
-        for term in terms
-    ) or '<p class="muted">Aucun terme.</p>'
+    term_rows = []
+    for term in terms:
+        term_id = int(term["id"])
+        is_featured = featured_term_id == term_id
+        term_rows.append(
+            f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms/delete"))}" class="term-item">'
+            f'<input type="hidden" name="id" value="{term_id}" />'
+            f'<div class="term-left"><span class="term-dot"></span><div class="term-name" title="{escape_html(term["label"])}">{escape_html(term["label"])}</div></div>'
+            '<div class="term-actions">'
+            f'<button type="submit" class="btn btn-star {"is-active" if is_featured else ""}" formaction="{escape_html(with_base_path(base_path, "/settings/search-terms/featured"))}" title="Definir comme vedette" aria-label="Definir comme vedette">{("★" if is_featured else "☆")}</button>'
+            '<button type="submit" class="btn btn-delete">Supprimer</button>'
+            '</div></form>'
+        )
+    terms_html = "".join(term_rows) or '<p class="muted">Aucun terme.</p>'
     feeds_html = "".join(
         f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/feeds/delete"))}" class="feed-item"><input type="hidden" name="id" value="{feed["id"]}" /><div class="feed-name-wrap"><span class="feed-dot"></span><div class="feed-name" title="{escape_html(feed["name"])}">{escape_html(feed["name"])}</div></div><div class="feed-url-wrap"><div class="feed-url" title="{escape_html(feed["url"])}">{escape_html(feed["url"])}</div></div><button type="submit" class="btn btn-delete">Supprimer</button></form>'
         for feed in feeds
@@ -1702,7 +1800,7 @@ class AppHandler(BaseHTTPRequestHandler):
             return
 
         if path_name == "/archives":
-            self.send_html(200, render_archives_page(query, base_path), head_only=head_only)
+            self.redirect(with_base_path(base_path, "/"))
             return
 
         if path_name == "/setup":
@@ -1857,6 +1955,12 @@ class AppHandler(BaseHTTPRequestHandler):
             form = read_form(self)
             add_search_term(str(form.get("label") or ""))
             self.redirect(with_base_path(base_path, "/settings?type=success&message=Terme%20ajoute"))
+            return
+
+        if path_name == "/settings/search-terms/featured":
+            form = read_form(self)
+            toggle_featured_search_term(int(form.get("id") or 0))
+            self.redirect(with_base_path(base_path, "/settings?type=success&message=Terme%20vedette%20mis%20a%20jour"))
             return
 
         if path_name == "/settings/search-terms/delete":
