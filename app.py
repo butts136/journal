@@ -1356,7 +1356,7 @@ def render_settings_journal_groups(journals: list[dict], base_path: str) -> str:
                 "</div>"
             )
         blocks.append(
-            f'<details class="library-group" open><summary class="library-group-summary"><span class="library-group-title"><strong>{escape_html(publication_name)}</strong><small>{len(items)} PDF</small></span><span class="library-group-caret"></span></summary>'
+            f'<details class="library-group"><summary class="library-group-summary"><span class="library-group-title"><strong>{escape_html(publication_name)}</strong><small>{len(items)} PDF</small></span><span class="library-group-caret"></span></summary>'
             f'<div class="library-group-actions"><button type="button" class="button-secondary compact-button" data-select-group="{escape_html(group_key)}">Tout selectionner</button><button type="button" class="button-secondary compact-button" data-clear-group="{escape_html(group_key)}">Effacer</button></div>'
             f'{"".join(rows)}</details>'
         )
