@@ -25,7 +25,12 @@
   const VISIBLE_MARGIN = 720;
   const RETAIN_MARGIN = 1800;
   const MAX_CONCURRENT_RENDERS = 1;
-  const QUALITY_SCALE = Math.min(Math.max(window.devicePixelRatio || 1, 1.6), 3);
+  const IS_TOUCH_DEVICE =
+    window.matchMedia("(pointer: coarse)").matches || (navigator.maxTouchPoints || 0) > 0;
+  const QUALITY_SCALE = Math.min(
+    Math.max(window.devicePixelRatio || 1, IS_TOUCH_DEVICE ? 2.2 : 1.6),
+    IS_TOUCH_DEVICE ? 4 : 3,
+  );
 
   let currentMode = "spread";
   let pdfDocument = null;
@@ -77,7 +82,7 @@
   }
 
   function getDesiredRenderMultiplier() {
-    return QUALITY_SCALE * Math.max(1, zoom);
+    return QUALITY_SCALE * Math.max(IS_TOUCH_DEVICE ? 1.15 : 1, zoom);
   }
 
   function updateModeButton() {
