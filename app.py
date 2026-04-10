@@ -1580,21 +1580,36 @@ def render_reader_page(journal: dict, base_path: str) -> str:
   <body class="reader-body" data-base-path="{escape_html(base_path)}">
     <div class="reader-screen">
       <header class="reader-toolbar">
-        <div class="reader-toolbar-main">
-          <a class="reader-control-button back-link" href="{escape_html(with_base_path(base_path, "/"))}">Retour</a>
+        <div class="reader-toolbar-row">
+          <a class="reader-control-button back-link reader-back-button" href="{escape_html(with_base_path(base_path, "/"))}" aria-label="Retour">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.9 5.3 8.2 12l6.7 6.7-1.4 1.4L5.4 12l8.1-8.1 1.4 1.4Z" fill="currentColor"/></svg>
+            <span class="reader-back-label">Retour</span>
+          </a>
           <strong class="reader-title">{escape_html(journal["display_title"])}</strong>
-        </div>
-        <div class="reader-toolbar-actions">
-          <span class="reader-status" id="reader-status">Chargement...</span>
-          <button type="button" class="reader-control-button" id="mode-cycle-button">2 pages</button>
-          <div class="reader-zoom-strip" id="zoom-control">
-            <span class="reader-zoom-label">Zoom</span>
-            <input id="zoom-range" class="reader-zoom-range" type="range" min="35" max="250" step="5" value="100" />
-            <span id="zoom-value" class="reader-zoom-value">100%</span>
+          <div class="reader-toolbar-actions">
+            <button type="button" class="reader-control-button" id="mode-cycle-button">2 pages</button>
+            <button type="button" class="reader-icon-button" id="zoom-toggle-button" aria-label="Zoom" title="Zoom">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 4.1 11.5l4 4 1.4-1.4-4-4A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z" fill="currentColor"/></svg>
+            </button>
+            <button type="button" class="reader-icon-button reader-info-button" id="info-toggle-button" aria-label="Informations" title="Informations">i</button>
+            <button type="button" class="reader-icon-button" id="fullscreen-toggle-button" aria-label="Plein ecran" title="Plein ecran">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10V4h6v2H6v4H4Zm10-6h6v6h-2V6h-4V4ZM6 16h4v2H4v-6h2v4Zm12-4h2v6h-6v-2h4v-4Z" fill="currentColor"/></svg>
+            </button>
           </div>
-          <button type="button" class="reader-icon-button" id="fullscreen-toggle-button" aria-label="Plein ecran" title="Plein ecran">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10V4h6v2H6v4H4Zm10-6h6v6h-2V6h-4V4ZM6 16h4v2H4v-6h2v4Zm12-4h2v6h-6v-2h4v-4Z" fill="currentColor"/></svg>
-          </button>
+        </div>
+        <div class="reader-toolbar-popups">
+          <div class="reader-toolbar-popup reader-zoom-popup" id="zoom-popup" hidden>
+            <label class="reader-zoom-strip" id="zoom-control" for="zoom-range">
+              <span class="reader-zoom-label">Zoom</span>
+              <input id="zoom-range" class="reader-zoom-range" type="range" min="35" max="250" step="5" value="100" />
+              <span id="zoom-value" class="reader-zoom-value">100%</span>
+            </label>
+          </div>
+          <div class="reader-toolbar-popup reader-info-popup" id="info-popup" hidden>
+            <span class="reader-info-kicker">Journal</span>
+            <strong class="reader-info-title">{escape_html(journal["display_title"])}</strong>
+            <span class="reader-status" id="reader-status">Chargement...</span>
+          </div>
         </div>
       </header>
       <main id="reader-root" class="reader-stage" data-pdf-url="{escape_html(pdf_url or '')}">
@@ -1602,7 +1617,7 @@ def render_reader_page(journal: dict, base_path: str) -> str:
       </main>
     </div>
     <script src="{PDFJS_URL}"></script>
-<script src="{escape_html(with_base_path(base_path, "/static/reader.js?v=12"))}"></script>
+<script src="{escape_html(with_base_path(base_path, "/static/reader.js?v=13"))}"></script>
   </body>
 </html>"""
 

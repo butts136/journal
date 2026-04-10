@@ -4,8 +4,12 @@
   const viewportNode = document.getElementById("reader-viewport");
   const panStageNode = document.getElementById("reader-pan-stage");
   const modeCycleButton = document.getElementById("mode-cycle-button");
+  const zoomToggleButton = document.getElementById("zoom-toggle-button");
+  const zoomPopup = document.getElementById("zoom-popup");
   const zoomRange = document.getElementById("zoom-range");
   const zoomValue = document.getElementById("zoom-value");
+  const infoToggleButton = document.getElementById("info-toggle-button");
+  const infoPopup = document.getElementById("info-popup");
   const fullscreenToggleButton = document.getElementById("fullscreen-toggle-button");
 
   if (!root || !statusNode || !viewportNode || !panStageNode) {
@@ -28,8 +32,8 @@
   const IS_TOUCH_DEVICE =
     window.matchMedia("(pointer: coarse)").matches || (navigator.maxTouchPoints || 0) > 0;
   const QUALITY_SCALE = Math.min(
-    Math.max(window.devicePixelRatio || 1, IS_TOUCH_DEVICE ? 2.2 : 1.6),
-    IS_TOUCH_DEVICE ? 4 : 3,
+    Math.max(window.devicePixelRatio || 1, IS_TOUCH_DEVICE ? 2.8 : 1.7),
+    IS_TOUCH_DEVICE ? 5 : 3.2,
   );
 
   let currentMode = "spread";
@@ -82,7 +86,51 @@
   }
 
   function getDesiredRenderMultiplier() {
-    return QUALITY_SCALE * Math.max(IS_TOUCH_DEVICE ? 1.15 : 1, zoom);
+    const modeBoost =
+      currentMode === "spread"
+        ? IS_TOUCH_DEVICE
+          ? 2.1
+          : 1.35
+        : currentMode === "horizontal"
+          ? IS_TOUCH_DEVICE
+            ? 1.45
+            : 1.15
+          : IS_TOUCH_DEVICE
+            ? 1.3
+            : 1.05;
+    return Math.min(QUALITY_SCALE * modeBoost, IS_TOUCH_DEVICE ? 8.2 : 4.2);
+  }
+
+  function setPopupState(node, button, isOpen) {
+    if (!node || !button) {
+      return;
+    }
+
+    node.hidden = !isOpen;
+    button.classList.toggle("is-active", isOpen);
+    button.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  }
+
+  function closeToolbarPopups(exceptNode = null) {
+    [
+      [zoomPopup, zoomToggleButton],
+      [infoPopup, infoToggleButton],
+    ].forEach(([node, button]) => {
+      if (!node || node === exceptNode) {
+        return;
+      }
+      setPopupState(node, button, false);
+    });
+  }
+
+  function toggleToolbarPopup(node, button) {
+    if (!node || !button) {
+      return;
+    }
+
+    const shouldOpen = node.hidden;
+    closeToolbarPopups(shouldOpen ? node : null);
+    setPopupState(node, button, shouldOpen);
   }
 
   function updateModeButton() {
@@ -103,6 +151,11 @@
 
     if (zoomValue) {
       zoomValue.textContent = formattedZoom;
+    }
+
+    if (zoomToggleButton) {
+      zoomToggleButton.setAttribute("aria-label", `Zoom ${formattedZoom}`);
+      zoomToggleButton.setAttribute("title", `Zoom ${formattedZoom}`);
     }
   }
 
@@ -285,6 +338,9 @@
         throw new Error("Canvas 2D indisponible.");
       }
 
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+
       canvas.width = Math.max(1, Math.ceil(renderViewport.width));
       canvas.height = Math.max(1, Math.ceil(renderViewport.height));
       canvas.style.width = `${Math.ceil(entry.displayWidth)}px`;
@@ -357,13 +413,9 @@
 
     const version = renderVersion;
     const visibleEntries = [];
-    const desiredRenderMultiplier = getDesiredRenderMultiplier();
 
     pageEntries.forEach((entry) => {
       if (isEntryNearViewport(entry, VISIBLE_MARGIN)) {
-        if (entry.rendered && Math.abs((entry.renderScaleFactor || 0) - desiredRenderMultiplier) > 0.08) {
-          entry.needsRerender = true;
-        }
         visibleEntries.push(entry);
       } else if (!isEntryNearViewport(entry, RETAIN_MARGIN)) {
         releaseEntry(entry);
@@ -529,8 +581,25 @@
     });
   }
 
+  if (zoomToggleButton) {
+    zoomToggleButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleToolbarPopup(zoomPopup, zoomToggleButton);
+    });
+  }
+
+  if (infoToggleButton) {
+    infoToggleButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleToolbarPopup(infoPopup, infoToggleButton);
+    });
+  }
+
   if (zoomRange) {
-    zoomRange.addEventListener("input", () => {
+    zoomRange.addEventListener("input", (event) => {
+      event.stopPropagation();
       changeZoom(Number(zoomRange.value) / 100);
     });
   }
@@ -559,6 +628,23 @@
     document.addEventListener("fullscreenchange", updateFullscreenButton);
     updateFullscreenButton();
   }
+
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+
+    const insidePopup =
+      (zoomPopup && zoomPopup.contains(target)) ||
+      (infoPopup && infoPopup.contains(target)) ||
+      (zoomToggleButton && zoomToggleButton.contains(target)) ||
+      (infoToggleButton && infoToggleButton.contains(target));
+
+    if (!insidePopup) {
+      closeToolbarPopups();
+    }
+  });
 
   viewportNode.addEventListener("pointerdown", (event) => {
     if (!pdfDocument) {
