@@ -1429,7 +1429,7 @@ def render_settings_page(handler: BaseHTTPRequestHandler, query: dict, base_path
         for term in terms
     ) or '<p class="muted">Aucun terme.</p>'
     feeds_html = "".join(
-        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/feeds/delete"))}" class="settings-list-item settings-feed-item"><input type="hidden" name="id" value="{feed["id"]}" /><div><strong>{escape_html(feed["name"])}</strong><span>{escape_html(feed["url"])}</span></div><button type="submit" class="button-secondary compact-button">Supprimer</button></form>'
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/feeds/delete"))}" class="feed-item"><input type="hidden" name="id" value="{feed["id"]}" /><div class="feed-name-wrap"><span class="feed-dot"></span><div class="feed-name" title="{escape_html(feed["name"])}">{escape_html(feed["name"])}</div></div><div class="feed-url-wrap"><div class="feed-url" title="{escape_html(feed["url"])}">{escape_html(feed["url"])}</div></div><button type="submit" class="btn btn-delete">Supprimer</button></form>'
         for feed in feeds
     ) or '<p class="muted">Aucun flux.</p>'
     body = (
@@ -1450,9 +1450,9 @@ def render_settings_page(handler: BaseHTTPRequestHandler, query: dict, base_path
         '<section class="settings-card terms-card"><div class="terms-content"><div class="terms-header"><div class="terms-title"><span class="terms-title-dot"></span><span>Termes suivis</span></div><p class="terms-subtitle">Un nouveau terme declenche un prochain scan profond sur 30 jours.</p></div>'
         f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms"))}" class="terms-add-row"><input type="text" name="label" class="terms-input" placeholder="Ajouter un terme..." autocomplete="off" required /><button type="submit" class="btn btn-add">Ajouter</button></form>'
         f'<div class="terms-list">{terms_html}</div></div></section>'
-        '<section class="settings-card"><div class="settings-card-head"><div><span class="eyebrow">Ingestion</span><h2>Flux RSS / Torznab</h2></div><p>Ajoute ou retire les indexeurs surveilles.</p></div>'
-        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/feeds"))}" class="settings-form-stack"><label>Nom<input type="text" name="name" placeholder="Prowlarr #1" required /></label><label>URL<input type="url" name="url" placeholder="https://..." required /></label><button type="submit">Ajouter le flux</button></form>'
-        f'<div class="settings-list">{feeds_html}</div></section>'
+        '<section class="settings-card feeds-card"><div class="feeds-content"><div class="feeds-header"><div class="feeds-title"><span class="feeds-title-dot"></span><span>Flux RSS / Torznab</span></div><p class="feeds-subtitle">Ajoute ou retire les indexeurs surveilles.</p></div>'
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/feeds"))}" class="feeds-form"><label class="field-group"><span class="field-label">Nom</span><input type="text" name="name" class="feeds-input" placeholder="Prowlarr #1" autocomplete="off" required /></label><label class="field-group"><span class="field-label">URL</span><input type="url" name="url" class="feeds-input" placeholder="https://..." autocomplete="off" required /></label><div class="form-action"><button type="submit" class="btn btn-add">Ajouter le flux</button></div></form>'
+        f'<div class="feeds-list">{feeds_html}</div></div></section>'
         f'<section class="settings-card settings-library-card"><div class="settings-card-head"><div><span class="eyebrow">Bibliotheque</span><h2>PDF enregistres</h2></div><p>Une section repliable par publication. Suppression simple ou multiple.</p></div>{render_settings_journal_groups(journals, base_path)}</section>'
         "</main>"
         '<aside class="settings-sidebar">'
