@@ -25,7 +25,7 @@
     { key: "horizontal", label: "Horizontal" },
   ];
   const MIN_ZOOM = 0.35;
-  const MAX_ZOOM = 2.5;
+  const MAX_ZOOM = 10;
   const VISIBLE_MARGIN = 720;
   const RETAIN_MARGIN = 1800;
   const MAX_CONCURRENT_RENDERS = 1;

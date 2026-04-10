@@ -1601,7 +1601,7 @@ def render_reader_page(journal: dict, base_path: str) -> str:
           <div class="reader-toolbar-popup reader-zoom-popup" id="zoom-popup" hidden>
             <label class="reader-zoom-strip" id="zoom-control" for="zoom-range">
               <span class="reader-zoom-label">Zoom</span>
-              <input id="zoom-range" class="reader-zoom-range" type="range" min="35" max="250" step="5" value="100" />
+              <input id="zoom-range" class="reader-zoom-range" type="range" min="35" max="1000" step="5" value="100" />
               <span id="zoom-value" class="reader-zoom-value">100%</span>
             </label>
           </div>
@@ -1617,7 +1617,7 @@ def render_reader_page(journal: dict, base_path: str) -> str:
       </main>
     </div>
     <script src="{PDFJS_URL}"></script>
-<script src="{escape_html(with_base_path(base_path, "/static/reader.js?v=13"))}"></script>
+<script src="{escape_html(with_base_path(base_path, "/static/reader.js?v=14"))}"></script>
   </body>
 </html>"""
 
