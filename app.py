@@ -1420,6 +1420,10 @@ def render_settings_page(handler: BaseHTTPRequestHandler, query: dict, base_path
     terms = get_all_search_terms()
     feeds = get_all_feeds()
     journals = get_all_journals()
+    scan_status = "Oui" if snapshot["scanRunning"] else "Non"
+    scan_status_class = "success" if snapshot["scanRunning"] else "warning"
+    last_error = snapshot["lastError"] or "Aucune"
+    error_status_class = "success" if last_error == "Aucune" else "danger"
     terms_html = "".join(
         f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms/delete"))}" class="settings-list-item"><input type="hidden" name="id" value="{term["id"]}" /><div><strong>{escape_html(term["label"])}</strong><span>Correspondance accent-insensible</span></div><button type="submit" class="button-secondary compact-button">Supprimer</button></form>'
         for term in terms
@@ -1432,14 +1436,14 @@ def render_settings_page(handler: BaseHTTPRequestHandler, query: dict, base_path
         '<section class="settings-page">'
         '<header class="settings-header-card">'
         '<div class="settings-header-copy"><span class="eyebrow">Administration</span><h1>Parametres du kiosque</h1><p>Flux RSS, termes, politiques de retention et bibliotheque PDF dans une vue claire et compacte.</p></div>'
-        '<div class="settings-stats">'
-        f'<article class="settings-stat-card"><strong>{snapshot["readyCount"]}</strong><span>PDF prets</span></article>'
-        f'<article class="settings-stat-card"><strong>{snapshot["downloadingCount"]}</strong><span>Telechargements</span></article>'
-        f'<article class="settings-stat-card"><strong>{len(terms)}</strong><span>Termes</span></article>'
-        f'<article class="settings-stat-card"><strong>{len(feeds)}</strong><span>Flux</span></article>'
-        f'<article class="settings-stat-card is-wide"><strong>{"Oui" if snapshot["scanRunning"] else "Non"}</strong><span>Scan actif</span></article>'
-        f'<article class="settings-stat-card is-wide"><strong>{escape_html(snapshot["lastError"] or "Aucune")}</strong><span>Derniere erreur</span></article>'
-        "</div></header>"
+        '<section class="status-card" id="journalStatus"><div class="status-grid">'
+        f'<article class="status-item"><div class="status-label"><span class="dot"></span>PDF prets</div><div class="status-value" data-key="pdfPrets">{snapshot["readyCount"]}</div></article>'
+        f'<article class="status-item"><div class="status-label"><span class="dot"></span>Telechargements en cours</div><div class="status-value" data-key="downloadsEnCours">{snapshot["downloadingCount"]}</div></article>'
+        f'<article class="status-item"><div class="status-label"><span class="dot"></span>Termes a rechercher</div><div class="status-value" data-key="termesRecherche">{len(terms)}</div></article>'
+        f'<article class="status-item"><div class="status-label"><span class="dot"></span>Flux de surveillance</div><div class="status-value" data-key="fluxSurveillance">{len(feeds)}</div></article>'
+        f'<article class="status-item"><div class="status-label"><span class="dot"></span>Scan actif</div><div class="status-value small {scan_status_class}" data-key="scanActif">{scan_status}</div></article>'
+        f'<article class="status-item"><div class="status-label"><span class="dot"></span>Derniere erreur</div><div class="status-value small {error_status_class}" data-key="derniereErreur">{escape_html(last_error)}</div></article>'
+        "</div></section></header>"
         f"{get_flash(query)}"
         '<div class="settings-layout">'
         '<main class="settings-main">'
