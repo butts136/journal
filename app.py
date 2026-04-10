@@ -1425,7 +1425,7 @@ def render_settings_page(handler: BaseHTTPRequestHandler, query: dict, base_path
     last_error = snapshot["lastError"] or "Aucune"
     error_status_class = "success" if last_error == "Aucune" else "danger"
     terms_html = "".join(
-        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms/delete"))}" class="settings-list-item"><input type="hidden" name="id" value="{term["id"]}" /><div><strong>{escape_html(term["label"])}</strong><span>Correspondance accent-insensible</span></div><button type="submit" class="button-secondary compact-button">Supprimer</button></form>'
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms/delete"))}" class="term-item"><input type="hidden" name="id" value="{term["id"]}" /><div class="term-left"><span class="term-dot"></span><div class="term-name" title="{escape_html(term["label"])}">{escape_html(term["label"])}</div></div><button type="submit" class="btn btn-delete">Supprimer</button></form>'
         for term in terms
     ) or '<p class="muted">Aucun terme.</p>'
     feeds_html = "".join(
@@ -1447,9 +1447,9 @@ def render_settings_page(handler: BaseHTTPRequestHandler, query: dict, base_path
         f"{get_flash(query)}"
         '<div class="settings-layout">'
         '<main class="settings-main">'
-        '<section class="settings-card"><div class="settings-card-head"><div><span class="eyebrow">Recherche</span><h2>Termes suivis</h2></div><p>Un nouveau terme declenche un prochain scan profond sur 30 jours.</p></div>'
-        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms"))}" class="settings-form-inline"><input type="text" name="label" placeholder="Journal de Montreal" required /><button type="submit">Ajouter</button></form>'
-        f'<div class="settings-list">{terms_html}</div></section>'
+        '<section class="settings-card terms-card"><div class="terms-content"><div class="terms-header"><div class="terms-title"><span class="terms-title-dot"></span><span>Termes suivis</span></div><p class="terms-subtitle">Un nouveau terme declenche un prochain scan profond sur 30 jours.</p></div>'
+        f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/search-terms"))}" class="terms-add-row"><input type="text" name="label" class="terms-input" placeholder="Ajouter un terme..." autocomplete="off" required /><button type="submit" class="btn btn-add">Ajouter</button></form>'
+        f'<div class="terms-list">{terms_html}</div></div></section>'
         '<section class="settings-card"><div class="settings-card-head"><div><span class="eyebrow">Ingestion</span><h2>Flux RSS / Torznab</h2></div><p>Ajoute ou retire les indexeurs surveilles.</p></div>'
         f'<form method="post" action="{escape_html(with_base_path(base_path, "/settings/feeds"))}" class="settings-form-stack"><label>Nom<input type="text" name="name" placeholder="Prowlarr #1" required /></label><label>URL<input type="url" name="url" placeholder="https://..." required /></label><button type="submit">Ajouter le flux</button></form>'
         f'<div class="settings-list">{feeds_html}</div></section>'
