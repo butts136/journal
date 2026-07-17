@@ -1430,7 +1430,7 @@ def render_home_page(query: dict, base_path: str, selected_publication: str = ""
         f"{render_journal_grid(recent_journals, base_path, highlighted_ids)}"
         f"{render_home_archives(base_path, selected_publication)}"
     )
-    return render_shell("Accueil", body, current_path="/", scripts=[PDFJS_URL, "/static/app.js"], body_class="catalog-body", base_path=base_path)
+    return render_shell("Accueil", body, current_path="/", scripts=[PDFJS_URL, "/static/app.js?v=3"], body_class="catalog-body", base_path=base_path)
 
 
 def group_archived_journals(journals: list[dict]) -> list[tuple[str, list[tuple[str, list[dict]]]]]:
@@ -1539,7 +1539,7 @@ def render_archives_page(query: dict, base_path: str) -> str:
         f"{get_flash(query)}"
         f"{sections_html}"
     )
-    return render_shell("Archives", body, current_path="/archives", scripts=[PDFJS_URL, "/static/app.js"], body_class="catalog-body", base_path=base_path)
+    return render_shell("Archives", body, current_path="/archives", scripts=[PDFJS_URL, "/static/app.js?v=3"], body_class="catalog-body", base_path=base_path)
 
 
 def render_setup_page(query: dict, base_path: str) -> Optional[str]:
@@ -1687,7 +1687,7 @@ def render_reader_page(journal: dict, base_path: str) -> str:
       </main>
     </div>
     <script src="{PDFJS_URL}"></script>
-<script src="{escape_html(with_base_path(base_path, "/static/reader.js?v=14"))}"></script>
+<script src="{escape_html(with_base_path(base_path, "/static/reader.js?v=15"))}"></script>
   </body>
 </html>"""
 

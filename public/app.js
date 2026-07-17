@@ -123,6 +123,10 @@
   }
 
   async function renderCard(card) {
+    if (card.dataset.thumbLoading === "1") {
+      return;
+    }
+
     const pdfUrl = card.dataset.pdfUrl;
     const thumbUrl = card.dataset.thumbUrl;
     const canvas = card.querySelector("canvas");
@@ -137,14 +141,16 @@
       return;
     }
 
-    const cachedThumb = readCachedThumb(pdfUrl);
-    if (cachedThumb) {
-      paintThumbImage(card, cachedThumb);
-      persistThumb(card, cachedThumb);
-      return;
-    }
+    card.dataset.thumbLoading = "1";
 
     try {
+      const cachedThumb = readCachedThumb(pdfUrl);
+      if (cachedThumb) {
+        paintThumbImage(card, cachedThumb);
+        await persistThumb(card, cachedThumb);
+        return;
+      }
+
       const pdf = await window.pdfjsLib.getDocument(pdfUrl).promise;
       const page = await pdf.getPage(1);
       const viewport = page.getViewport({ scale: 1 });
@@ -163,11 +169,13 @@
       const dataUrl = canvas.toDataURL("image/webp", 0.82);
       writeCachedThumb(pdfUrl, dataUrl);
       paintThumbImage(card, dataUrl);
-      persistThumb(card, dataUrl);
+      await persistThumb(card, dataUrl);
     } catch {
       if (fallback) {
         fallback.textContent = "Miniature indisponible";
       }
+    } finally {
+      card.dataset.thumbLoading = "0";
     }
   }
 
@@ -186,6 +194,23 @@
     cards.forEach((card) => observer.observe(card));
   } else {
     cards.forEach(renderCard);
+  }
+
+  // Complete the persistent thumbnail cache without forcing parallel PDF work.
+  // The visible cards still take priority through IntersectionObserver above.
+  const warmQueue = cards.filter((card) => !card.dataset.thumbUrl);
+  async function warmNextThumbnail() {
+    const card = warmQueue.shift();
+    if (!card) {
+      return;
+    }
+
+    await renderCard(card);
+    window.setTimeout(warmNextThumbnail, 450);
+  }
+
+  if (warmQueue.length) {
+    window.setTimeout(warmNextThumbnail, 900);
   }
 
   filterBadges.forEach((badge) => {
