@@ -62,7 +62,10 @@ PUBLIC_ROOT = (BASE_DIR / "public").resolve()
 PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
 MAX_REQUEST_BODY_SIZE = 1024 * 1024
 MAX_RSS_SIZE = 8 * 1024 * 1024
-GOD_ACCESS_PASSWORD = os.environ.get("GOD_ACCESS_PASSWORD", "@136Butts5722")
+MAX_THUMBNAIL_SIZE = 2 * 1024 * 1024
+TORRENT_TIMEOUT_SECONDS = max(60, int(os.environ.get("TORRENT_TIMEOUT_SECONDS", "1800")))
+# This recovery password is deliberately environment-only: it must never be committed.
+GOD_ACCESS_PASSWORD = os.environ.get("GOD_ACCESS_PASSWORD", "")
 HOME_FILTER_COOKIE_NAME = "journal_home_filter"
 
 MONTH_NAMES = [
@@ -211,6 +214,7 @@ class RuntimeState:
         self.scan_running = False
         self.last_success_at: Optional[str] = None
         self.last_error: Optional[str] = None
+        self.shutdown_requested = threading.Event()
 
 
 runtime = RuntimeState()
@@ -510,7 +514,7 @@ def get_latest_ready_journal_for_publication(publication_name: str) -> Optional[
 def create_journal_if_missing(payload: dict) -> dict:
     existing = query_one(
         """
-        SELECT id FROM journals
+        SELECT id, status FROM journals
         WHERE (source_guid IS NOT NULL AND source_guid = ?)
            OR (info_hash IS NOT NULL AND info_hash = ?)
            OR (publication_key = ? AND publication_date = ?)
@@ -525,7 +529,14 @@ def create_journal_if_missing(payload: dict) -> dict:
     )
 
     if existing:
-        return {"id": int(existing["id"]), "created": False}
+        status = str(existing["status"] or "")
+        # A transient RSS, torrent, or client failure must not permanently block a
+        # publication/date. Ready and active downloads remain protected from duplicates.
+        return {
+            "id": int(existing["id"]),
+            "created": False,
+            "retry": status in {"error", "queued"},
+        }
 
     cursor = execute(
         """
@@ -559,7 +570,7 @@ def create_journal_if_missing(payload: dict) -> dict:
         ),
     )
 
-    return {"id": int(cursor.lastrowid), "created": True}
+    return {"id": int(cursor.lastrowid), "created": True, "retry": False}
 
 
 def update_journal_status(journal_id: int, status: str, **extra: object) -> None:
@@ -970,12 +981,50 @@ def parse_journal_candidate(item: dict, search_terms: list[dict]) -> Optional[di
     }
 
 
+def stop_external_process(process: subprocess.Popen) -> None:
+    try:
+        if os.name == "posix":
+            os.killpg(process.pid, signal.SIGTERM)
+        else:
+            process.terminate()
+        process.wait(timeout=8)
+    except Exception:
+        try:
+            if os.name == "posix":
+                os.killpg(process.pid, signal.SIGKILL)
+            else:
+                process.kill()
+        except Exception:
+            pass
+
+
 def run_external_command(command: str, args: list[str], cwd: Path) -> tuple[str, str]:
-    process = subprocess.run([command, *args], cwd=str(cwd), capture_output=True, text=True)
+    process = subprocess.Popen(
+        [command, *args],
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=os.name == "posix",
+    )
+    deadline = time.monotonic() + TORRENT_TIMEOUT_SECONDS
+
+    while True:
+        if runtime.shutdown_requested.is_set():
+            stop_external_process(process)
+            raise RuntimeError("Telechargement annule pendant l'arret du serveur.")
+        try:
+            stdout, stderr = process.communicate(timeout=1)
+            break
+        except subprocess.TimeoutExpired:
+            if time.monotonic() >= deadline:
+                stop_external_process(process)
+                raise RuntimeError(f"Telechargement torrent interrompu apres {TORRENT_TIMEOUT_SECONDS // 60} minutes.")
+
     if process.returncode != 0:
-        message = (process.stderr or process.stdout or f"La commande externe {command} a echoue.").strip()
+        message = (stderr or stdout or f"La commande externe {command} a echoue.").strip()
         raise RuntimeError(message)
-    return process.stdout, process.stderr
+    return stdout, stderr
 
 
 def find_largest_pdf(directory: Path) -> Optional[dict]:
@@ -1068,7 +1117,7 @@ def process_feed_item(feed_id: int, item: dict, max_scan_age_days: int) -> None:
         }
     )
 
-    if not journal["created"]:
+    if not journal["created"] and not journal.get("retry"):
         return
 
     if not item.get("enclosureUrl") and not item.get("link"):
@@ -1111,6 +1160,7 @@ def run_scan_cycle() -> None:
     runtime.last_error = None
     broadcast_event("scan-started", {"time": int(time.time() * 1000)})
 
+    scan_errors = []
     try:
         auto_delete_old_journals()
         config = get_app_config()
@@ -1119,13 +1169,20 @@ def run_scan_cycle() -> None:
         for feed in feeds:
             if is_queryable_search_feed(feed["url"]):
                 for term in terms:
-                    scan_feed(feed, max_scan_age_days, term["label"])
+                    try:
+                        scan_feed(feed, max_scan_age_days, term["label"])
+                    except Exception as exc:
+                        scan_errors.append(f"{feed['name']} ({term['label']}): {str(exc) or 'echec du flux'}")
             else:
-                scan_feed(feed, max_scan_age_days)
-        if is_deep_scan:
+                try:
+                    scan_feed(feed, max_scan_age_days)
+                except Exception as exc:
+                    scan_errors.append(f"{feed['name']}: {str(exc) or 'echec du flux'}")
+        if is_deep_scan and not scan_errors:
             mark_deep_scan_complete(config["search_terms_revision"])
         auto_delete_old_journals()
         runtime.last_success_at = datetime.utcnow().isoformat()
+        runtime.last_error = " | ".join(scan_errors) if scan_errors else None
     except Exception as exc:
         runtime.last_error = str(exc) or "Echec inconnu pendant le scan."
     finally:
@@ -1200,7 +1257,20 @@ def read_cookies(handler: BaseHTTPRequestHandler) -> dict:
 
 
 def get_base_path(handler: BaseHTTPRequestHandler) -> str:
-    return normalize_base_path(handler.headers.get("X-Forwarded-Prefix") or "")
+    return normalize_base_path(handler.headers.get("X-Forwarded-Prefix") or DEFAULT_BASE_PATH)
+
+
+def is_same_origin_request(handler: BaseHTTPRequestHandler) -> bool:
+    origin = str(handler.headers.get("Origin") or "").strip()
+    if not origin:
+        return False
+    try:
+        parsed_origin = urllib.parse.urlsplit(origin)
+        origin_host = parsed_origin.netloc.lower()
+    except Exception:
+        return False
+    expected_host = str(handler.headers.get("X-Forwarded-Host") or handler.headers.get("Host") or "").lower()
+    return bool(origin_host and expected_host and hmac.compare_digest(origin_host, expected_host))
 
 
 def is_admin_authenticated(handler: BaseHTTPRequestHandler) -> bool:
@@ -1888,6 +1958,9 @@ class AppHandler(BaseHTTPRequestHandler):
         path_name, _ = parse_query(self.path)
 
         if path_name == "/api/thumbnail":
+            if not is_same_origin_request(self):
+                self.send_json(403, {"ok": False, "error": "Origine miniature non autorisee."})
+                return
             payload = read_json(self)
             journal_id = int(payload.get("journalId") or 0)
             image_data_url = str(payload.get("imageDataUrl") or "")
@@ -1908,8 +1981,22 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
 
             thumbnail_absolute_path = resolve_managed_path(thumbnail_relative_path)
+            if thumbnail_absolute_path.exists():
+                update_journal_status(journal["id"], journal["status"], thumbnail_relative_path=thumbnail_relative_path)
+                self.send_json(200, {"ok": True, "thumbnailUrl": to_managed_file_url(thumbnail_relative_path, base_path)})
+                return
+
+            try:
+                thumbnail_data = base64.b64decode(match.group(1), validate=True)
+            except Exception:
+                self.send_json(400, {"ok": False, "error": "Miniature invalide."})
+                return
+            if not thumbnail_data or len(thumbnail_data) > MAX_THUMBNAIL_SIZE:
+                self.send_json(413, {"ok": False, "error": "Miniature trop volumineuse."})
+                return
+
             ensure_dir(thumbnail_absolute_path.parent)
-            thumbnail_absolute_path.write_bytes(base64.b64decode(match.group(1)))
+            thumbnail_absolute_path.write_bytes(thumbnail_data)
 
             update_journal_status(journal["id"], journal["status"], thumbnail_relative_path=thumbnail_relative_path)
             self.send_json(
@@ -2069,6 +2156,7 @@ def main() -> int:
         if stop_once.is_set():
             return
         stop_once.set()
+        runtime.shutdown_requested.set()
         threading.Thread(target=server.shutdown, daemon=True).start()
 
     for sig in (signal.SIGINT, signal.SIGTERM):

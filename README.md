@@ -60,6 +60,8 @@ Au premier lancement, ouvre `/setup` pour definir le mot de passe administrateur
 - `JOURNAL_DB_PATH` : chemin SQLite
 - `JOURNAL_STORAGE_DIR` : dossier des PDF telecharges
 - `DEFAULT_RSS_FEEDS` : flux RSS/Torznab separes par virgule ou retour ligne
+- `GOD_ACCESS_PASSWORD` : mot de passe de recuperation admin, a definir uniquement dans `.env.local`
+- `TORRENT_TIMEOUT_SECONDS` : delai maximal d'un telechargement torrent (1800 par defaut)
 
 ## Reverse Proxy Nginx
 

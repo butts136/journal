@@ -31,6 +31,7 @@
   const MAX_CONCURRENT_RENDERS = 1;
   const IS_TOUCH_DEVICE =
     window.matchMedia("(pointer: coarse)").matches || (navigator.maxTouchPoints || 0) > 0;
+  const MAX_CANVAS_PIXELS = IS_TOUCH_DEVICE ? 14_000_000 : 24_000_000;
   const QUALITY_SCALE = Math.min(
     Math.max(window.devicePixelRatio || 1, IS_TOUCH_DEVICE ? 2.8 : 1.7),
     IS_TOUCH_DEVICE ? 5 : 3.2,
@@ -46,6 +47,7 @@
   let pinchState = null;
   let hasCompletedInitialRender = false;
   let resizeTimer = null;
+  let zoomRenderTimer = null;
   let pageEntries = [];
   let renderQueue = [];
   let scheduledVisibilityPass = 0;
@@ -85,7 +87,7 @@
     setStatus(`${pdfDocument.numPages} pages · ${Math.round(zoom * 100)}% · ${readyCount} chargees`);
   }
 
-  function getDesiredRenderMultiplier() {
+  function getDesiredRenderMultiplier(entry) {
     const modeBoost =
       currentMode === "spread"
         ? IS_TOUCH_DEVICE
@@ -98,7 +100,14 @@
           : IS_TOUCH_DEVICE
             ? 1.3
             : 1.05;
-    return Math.min(QUALITY_SCALE * modeBoost, IS_TOUCH_DEVICE ? 8.2 : 4.2);
+    const baseMultiplier = QUALITY_SCALE * modeBoost;
+    // Zoom is instant because it is a CSS transform. Once it settles, only the
+    // visible sheets are upgraded, bounded by a safe canvas-memory budget.
+    const zoomMultiplier = Math.min(zoom, 4);
+    const desiredMultiplier = baseMultiplier * zoomMultiplier;
+    const pagePixels = Math.max(1, entry.displayWidth * entry.displayHeight);
+    const memoryBoundMultiplier = Math.sqrt(MAX_CANVAS_PIXELS / pagePixels);
+    return Math.min(desiredMultiplier, Math.max(1, memoryBoundMultiplier));
   }
 
   function setPopupState(node, button, isOpen) {
@@ -180,9 +189,11 @@
     const minY = -scaledHeight + visibleHeight;
     const maxY = viewportHeight - visibleHeight;
 
+    const centerX = (viewportWidth - scaledWidth) / 2;
+    const centerY = (viewportHeight - scaledHeight) / 2;
     return {
-      x: Math.min(maxX, Math.max(minX, nextX)),
-      y: Math.min(maxY, Math.max(minY, nextY)),
+      x: minX > maxX ? centerX : Math.min(maxX, Math.max(minX, nextX)),
+      y: minY > maxY ? centerY : Math.min(maxY, Math.max(minY, nextY)),
     };
   }
 
@@ -211,6 +222,14 @@
     offsetX += deltaX;
     offsetY += deltaY;
     applyPanZoom();
+  }
+
+  function toViewportPoint(clientX, clientY) {
+    const bounds = viewportNode.getBoundingClientRect();
+    return {
+      x: clientX - bounds.left,
+      y: clientY - bounds.top,
+    };
   }
 
   function getBaseDisplayScale(page) {
@@ -322,7 +341,7 @@
     activeRenders += 1;
 
     try {
-      const desiredRenderMultiplier = getDesiredRenderMultiplier();
+      const desiredRenderMultiplier = getDesiredRenderMultiplier(entry);
       const page = entry.page || (await pdfDocument.getPage(entry.pageNumber));
       entry.page = page;
 
@@ -395,7 +414,7 @@
 
     while (activeRenders < MAX_CONCURRENT_RENDERS && renderQueue.length) {
       const nextEntry = renderQueue.shift();
-      if (!nextEntry || nextEntry.rendered || nextEntry.rendering) {
+      if (!nextEntry || (nextEntry.rendered && !nextEntry.needsRerender) || nextEntry.rendering) {
         continue;
       }
       renderEntry(nextEntry, version).catch((error) => {
@@ -426,6 +445,23 @@
     renderQueue = visibleEntries.filter((entry) => !entry.rendering && (!entry.rendered || entry.needsRerender));
     processRenderQueue(version);
     updateStatus();
+  }
+
+  function scheduleSharpVisibleRender() {
+    window.clearTimeout(zoomRenderTimer);
+    zoomRenderTimer = window.setTimeout(() => {
+      if (!pdfDocument) {
+        return;
+      }
+
+      pageEntries.forEach((entry) => {
+        if (!entry.rendering && entry.rendered && isEntryNearViewport(entry, VISIBLE_MARGIN)) {
+          const desired = getDesiredRenderMultiplier(entry);
+          entry.needsRerender = desired > entry.renderScaleFactor * 1.04;
+        }
+      });
+      scheduleVisibleRenders();
+    }, 220);
   }
 
   async function prepareEntry(pageNumber, version) {
@@ -461,10 +497,14 @@
   }
 
   async function renderDocument(pdf, options = {}) {
-    const { recenter = !hasCompletedInitialRender, preserveOffsets = false } = options;
+    const { recenter = !hasCompletedInitialRender, preserveView = false } = options;
     const version = ++renderVersion;
-    const savedOffsetX = offsetX;
-    const savedOffsetY = offsetY;
+    const savedView = preserveView
+      ? {
+          x: (viewportNode.clientWidth / 2 - offsetX) / zoom,
+          y: (viewportNode.clientHeight / 2 - offsetY) / zoom,
+        }
+      : null;
 
     renderQueue = [];
     pageEntries = [];
@@ -497,9 +537,9 @@
       const contentHeight = pagesNode.offsetHeight;
       offsetX = Math.max(0, (viewportNode.clientWidth - contentWidth * zoom) / 2);
       offsetY = Math.max(0, (viewportNode.clientHeight - contentHeight * zoom) / 2);
-    } else if (preserveOffsets) {
-      offsetX = savedOffsetX;
-      offsetY = savedOffsetY;
+    } else if (savedView) {
+      offsetX = viewportNode.clientWidth / 2 - savedView.x * zoom;
+      offsetY = viewportNode.clientHeight / 2 - savedView.y * zoom;
     }
 
     pagesNode.style.visibility = "visible";
@@ -540,7 +580,6 @@
     if (pdfDocument && options.rerender !== false) {
       renderDocument(pdfDocument, {
         recenter: true,
-        preserveOffsets: false,
       }).catch((error) => {
         showFallback(error instanceof Error ? error.message : "Impossible de changer le mode.");
       });
@@ -571,6 +610,7 @@
     offsetX = pivotX - logicalX * zoom;
     offsetY = pivotY - logicalY * zoom;
     applyPanZoom();
+    scheduleSharpVisibleRender();
   }
 
   if (modeCycleButton) {
@@ -671,13 +711,9 @@
       viewportNode.setPointerCapture(event.pointerId);
       const points = Array.from(activePointers.values());
       const startDistance = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) || 1;
-      const startCenterX = (points[0].x + points[1].x) / 2;
-      const startCenterY = (points[0].y + points[1].y) / 2;
       pinchState = {
         startDistance,
         startZoom: zoom,
-        startCenterX,
-        startCenterY,
       };
       dragState = null;
       viewportNode.classList.add("is-dragging");
@@ -699,9 +735,11 @@
       event.preventDefault();
       const points = Array.from(activePointers.values());
       const distance = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) || 1;
-      const centerX = (points[0].x + points[1].x) / 2;
-      const centerY = (points[0].y + points[1].y) / 2;
-      changeZoom(pinchState.startZoom * (distance / pinchState.startDistance), centerX, centerY);
+      const center = toViewportPoint(
+        (points[0].x + points[1].x) / 2,
+        (points[0].y + points[1].y) / 2,
+      );
+      changeZoom(pinchState.startZoom * (distance / pinchState.startDistance), center.x, center.y);
       return;
     }
 
@@ -758,7 +796,8 @@
 
     if (event.ctrlKey) {
       event.preventDefault();
-      changeZoom(zoom * (event.deltaY < 0 ? 1.05 : 1 / 1.05), event.clientX, event.clientY);
+      const point = toViewportPoint(event.clientX, event.clientY);
+      changeZoom(zoom * (event.deltaY < 0 ? 1.05 : 1 / 1.05), point.x, point.y);
       return;
     }
 
@@ -816,8 +855,8 @@
     window.clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(() => {
       renderDocument(pdfDocument, {
-        recenter: true,
-        preserveOffsets: false,
+        recenter: false,
+        preserveView: true,
       }).catch((error) => {
         showFallback(error instanceof Error ? error.message : "Impossible de recharger le PDF.");
       });
@@ -852,7 +891,6 @@
 
       await renderDocument(pdfDocument, {
         recenter: true,
-        preserveOffsets: false,
       });
     } catch (error) {
       showFallback(error instanceof Error ? error.message : "Impossible de charger le PDF.");
