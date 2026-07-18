@@ -1325,7 +1325,7 @@ def render_shell(title: str, body: str, current_path: str = "/", scripts: Option
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{escape_html(title)} | {APP_NAME}</title>
     <link rel="icon" type="image/svg+xml" href="{escape_html(with_base_path(base_path, "/static/favicon.svg"))}" />
-    <link rel="stylesheet" href="{escape_html(with_base_path(base_path, "/static/styles.css?v=4"))}" />
+    <link rel="stylesheet" href="{escape_html(with_base_path(base_path, "/static/styles.css?v=5"))}" />
   </head>
   <body class="{escape_html(body_class)}" data-base-path="{escape_html(base_path)}">
     <div class="page-shell">
@@ -1645,7 +1645,7 @@ def render_reader_page(journal: dict, base_path: str) -> str:
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{escape_html(journal["display_title"])} | {APP_NAME}</title>
     <link rel="icon" type="image/svg+xml" href="{escape_html(with_base_path(base_path, "/static/favicon.svg"))}" />
-    <link rel="stylesheet" href="{escape_html(with_base_path(base_path, "/static/styles.css?v=4"))}" />
+    <link rel="stylesheet" href="{escape_html(with_base_path(base_path, "/static/styles.css?v=5"))}" />
   </head>
   <body class="reader-body" data-base-path="{escape_html(base_path)}">
     <div class="reader-screen">

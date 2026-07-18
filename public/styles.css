@@ -2597,3 +2597,571 @@ body.catalog-body .section-head a {
 .settings-body .maintenance-card {
   padding: 16px;
 }
+
+/* Catalog and administration refresh */
+body.catalog-body {
+  --catalog-ink: #f5eee5;
+  --catalog-muted: #a79c90;
+  --catalog-line: rgba(255, 255, 255, 0.09);
+  --catalog-surface: rgba(20, 23, 27, 0.86);
+  --catalog-raised: rgba(31, 35, 40, 0.92);
+  --catalog-accent: #e47a4e;
+  background:
+    radial-gradient(64rem 36rem at -8% -10%, rgba(205, 85, 43, 0.2), transparent 55%),
+    radial-gradient(44rem 28rem at 110% 2%, rgba(86, 59, 45, 0.28), transparent 58%),
+    linear-gradient(145deg, #0b0d10 0%, #12161a 46%, #0a0c0f 100%);
+}
+
+body.catalog-body .page-shell {
+  width: min(1480px, calc(100% - 2.5rem));
+  padding: 1.1rem 0 3.5rem;
+}
+
+body.catalog-body .topbar {
+  position: sticky;
+  top: 0.75rem;
+  z-index: 20;
+  min-height: 4.1rem;
+  padding: 0.68rem 0.75rem 0.68rem 1rem;
+  border: 1px solid var(--catalog-line);
+  border-radius: 18px;
+  background: rgba(13, 16, 19, 0.78);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(18px);
+}
+
+body.catalog-body .brand {
+  gap: 0.75rem;
+}
+
+body.catalog-body .brand-mark {
+  width: 2.25rem;
+  height: 2.25rem;
+  color: #ffd5ba;
+  background: linear-gradient(145deg, #a54329, #6f2219);
+  box-shadow: 0 8px 20px rgba(202, 82, 41, 0.22);
+}
+
+body.catalog-body .brand strong,
+.home-feature-copy h1,
+.settings-header-copy h1 {
+  font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  letter-spacing: -0.03em;
+}
+
+body.catalog-body .brand small {
+  margin-top: 0.1rem;
+  color: var(--catalog-muted);
+}
+
+body.catalog-body .nav {
+  gap: 0.28rem;
+  padding: 0.24rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+body.catalog-body .nav a {
+  padding: 0.5rem 0.78rem;
+  border-radius: 9px;
+  color: #cdc4ba;
+}
+
+body.catalog-body .nav a:hover,
+body.catalog-body .nav a.is-active {
+  color: #fff8f1;
+  background: rgba(231, 118, 75, 0.16);
+}
+
+body.catalog-body .page-content {
+  display: grid;
+  gap: 1.15rem;
+  margin-top: 1.15rem;
+}
+
+.home-feature {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(220px, 0.65fr);
+  gap: clamp(1rem, 3vw, 2.8rem);
+  align-items: center;
+  min-height: 260px;
+  padding: clamp(1.2rem, 3.2vw, 2.35rem);
+  overflow: hidden;
+  border: 1px solid rgba(238, 147, 105, 0.22);
+  border-radius: 26px;
+  background:
+    linear-gradient(115deg, rgba(178, 67, 36, 0.26), rgba(25, 27, 31, 0.94) 48%, rgba(20, 23, 27, 0.92)),
+    var(--catalog-surface);
+  box-shadow: 0 28px 56px rgba(0, 0, 0, 0.24);
+}
+
+.home-feature::after {
+  content: "";
+  position: absolute;
+  right: -9rem;
+  bottom: -12rem;
+  width: 31rem;
+  height: 31rem;
+  border: 1px solid rgba(255, 219, 194, 0.1);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3.5rem rgba(255, 219, 194, 0.025), 0 0 0 7rem rgba(255, 219, 194, 0.018);
+  pointer-events: none;
+}
+
+.home-feature-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 680px;
+}
+
+.home-feature-copy h1 {
+  margin: 0.35rem 0 0.45rem;
+  color: #fff6ef;
+  font-size: clamp(2rem, 4.2vw, 4.4rem);
+  line-height: 0.94;
+}
+
+.home-feature-copy p {
+  color: #d2c4b7;
+  font-size: 0.98rem;
+}
+
+.home-feature-actions {
+  gap: 0.6rem;
+  margin-top: 1.35rem;
+}
+
+body.catalog-body .button-secondary {
+  border-color: rgba(255, 211, 185, 0.2);
+  background: rgba(255, 255, 255, 0.055);
+  color: #fff5ee;
+}
+
+body.catalog-body .button-secondary:hover {
+  transform: translateY(-1px);
+  border-color: rgba(243, 150, 109, 0.52);
+  background: rgba(222, 100, 59, 0.18);
+}
+
+.home-feature-card {
+  position: relative;
+  z-index: 1;
+  justify-self: end;
+  width: min(100%, 240px);
+}
+
+.home-feature-card .journal-card {
+  width: 100%;
+  transform: rotate(2deg);
+}
+
+.filter-badges {
+  display: flex;
+  gap: 0.48rem;
+  overflow-x: auto;
+  padding: 0.15rem 0 0.35rem;
+  scrollbar-width: thin;
+}
+
+.filter-badge {
+  flex: 0 0 auto;
+  padding: 0.48rem 0.78rem;
+  border: 1px solid var(--catalog-line);
+  border-radius: 999px;
+  color: var(--catalog-muted);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 0.82rem;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.filter-badge:hover,
+.filter-badge.is-active {
+  border-color: rgba(235, 126, 82, 0.58);
+  color: #fff8f2;
+  background: rgba(205, 85, 45, 0.2);
+}
+
+body.catalog-body .section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0.65rem 0 -0.1rem;
+  padding: 0 0.1rem;
+}
+
+body.catalog-body .section-head h2 {
+  margin: 0;
+  color: var(--catalog-ink);
+  font-family: "Palatino Linotype", Georgia, serif;
+  font-size: clamp(1.45rem, 2.2vw, 2rem);
+}
+
+body.catalog-body .section-head span {
+  color: var(--catalog-muted);
+  font-size: 0.82rem;
+}
+
+.journal-grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.9rem;
+}
+
+body.catalog-body .journal-card {
+  width: auto;
+  min-width: 0;
+  padding: 0.44rem;
+  overflow: hidden;
+  border: 1px solid var(--catalog-line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(36, 40, 45, 0.92), rgba(19, 22, 26, 0.96));
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.16);
+}
+
+body.catalog-body .journal-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(242, 151, 110, 0.48);
+  box-shadow: 0 20px 32px rgba(0, 0, 0, 0.3);
+}
+
+body.catalog-body .journal-card.is-featured {
+  border-color: rgba(255, 179, 134, 0.7);
+  box-shadow: 0 18px 34px rgba(165, 63, 34, 0.25);
+}
+
+body.catalog-body .journal-thumb {
+  aspect-ratio: 0.72;
+  border-radius: 11px;
+  background: #080a0c;
+}
+
+body.catalog-body .journal-thumb canvas,
+body.catalog-body .journal-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+body.catalog-body .journal-copy {
+  padding: 0.68rem 0.28rem 0.26rem;
+}
+
+body.catalog-body .journal-copy strong {
+  color: #fff7f0;
+  font-size: 0.87rem;
+  line-height: 1.25;
+}
+
+body.catalog-body .journal-copy span {
+  margin-top: 0.28rem;
+  color: #a89d92;
+  font-size: 0.73rem;
+}
+
+.journal-badge {
+  top: 0.55rem;
+  left: 0.55rem;
+  padding: 0.32rem 0.5rem;
+  border-radius: 7px;
+  background: rgba(164, 56, 29, 0.94);
+  color: #fff7ee;
+  font-size: 0.64rem;
+  letter-spacing: 0.03em;
+}
+
+.home-archives {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1.6rem;
+}
+
+.archive-group {
+  border: 1px solid var(--catalog-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.028);
+  overflow: hidden;
+}
+
+.archive-group-summary {
+  padding: 0.82rem 1rem;
+}
+
+.archive-group[open] {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+/* Settings: a calm control room with a readable action hierarchy. */
+.settings-body .page-shell {
+  width: min(1480px, calc(100% - 2.5rem));
+}
+
+.settings-page {
+  gap: 1.15rem;
+}
+
+.settings-header-card {
+  grid-template-columns: minmax(0, 1.05fr) minmax(410px, 0.95fr);
+  gap: 1.5rem;
+  padding: clamp(1.2rem, 3vw, 2rem);
+  border: 1px solid rgba(238, 147, 105, 0.16);
+  border-radius: 26px;
+  background:
+    radial-gradient(28rem 20rem at -5% -30%, rgba(196, 78, 39, 0.2), transparent 70%),
+    linear-gradient(135deg, rgba(26, 30, 35, 0.98), rgba(14, 17, 21, 0.98));
+}
+
+.settings-header-copy {
+  justify-content: center;
+}
+
+.settings-header-copy h1 {
+  color: #fff5ed;
+  font-size: clamp(2.2rem, 4vw, 4.1rem);
+}
+
+.settings-header-copy p {
+  max-width: 54ch;
+  color: #b8aca0;
+}
+
+.status-card {
+  padding: 0;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.status-card::before,
+.settings-body .terms-card::before,
+.settings-body .feeds-card::before,
+.settings-body .library-card::before,
+.settings-body .rules-card::before,
+.settings-body .cleanup-card::before,
+.settings-body .maintenance-card::before {
+  display: none;
+}
+
+.status-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.status-item {
+  min-height: 78px;
+  padding: 0.8rem 0.9rem;
+  border-color: rgba(255, 255, 255, 0.08);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.status-item:hover {
+  transform: none;
+  border-color: rgba(235, 128, 84, 0.34);
+  background: rgba(255, 255, 255, 0.065);
+}
+
+.status-label {
+  color: #aaa095;
+  font-size: 0.72rem;
+}
+
+.status-value {
+  color: #fff7f1;
+  font-size: 1.2rem;
+}
+
+.dot,
+.terms-title-dot,
+.feeds-title-dot,
+.library-title-dot,
+.rules-title-dot,
+.cleanup-title-dot,
+.maintenance-title-dot,
+.term-dot,
+.feed-dot {
+  background: var(--catalog-accent);
+  box-shadow: 0 0 11px rgba(228, 122, 78, 0.28);
+}
+
+.settings-layout {
+  grid-template-columns: minmax(0, 1fr) 310px;
+  gap: 1.15rem;
+}
+
+.settings-main,
+.settings-sidebar {
+  gap: 1.15rem;
+}
+
+.settings-body .settings-card {
+  padding: 1.1rem;
+  border: 1px solid var(--catalog-line);
+  border-radius: 20px;
+  background: linear-gradient(145deg, rgba(27, 31, 36, 0.95), rgba(16, 19, 23, 0.97));
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.16);
+}
+
+.settings-body .terms-header,
+.settings-body .feeds-header,
+.settings-body .library-header,
+.settings-body .rules-header,
+.settings-body .cleanup-header,
+.settings-body .maintenance-header {
+  margin-bottom: 1rem;
+}
+
+.settings-body .terms-title,
+.settings-body .feeds-title,
+.settings-body .library-title,
+.settings-body .rules-title,
+.settings-body .cleanup-title,
+.settings-body .maintenance-title {
+  color: #fff6ef;
+  font-size: 1rem;
+}
+
+.settings-body .terms-subtitle,
+.settings-body .feeds-subtitle,
+.settings-body .library-subtitle,
+.settings-body .rules-subtitle,
+.settings-body .cleanup-subtitle,
+.settings-body .maintenance-subtitle {
+  color: #aaa095;
+}
+
+.settings-body input[type="text"],
+.settings-body input[type="url"],
+.settings-body input[type="number"],
+.settings-body input[type="password"] {
+  min-height: 42px;
+  border-color: rgba(255, 255, 255, 0.1);
+  border-radius: 11px;
+  background: rgba(7, 9, 11, 0.34);
+}
+
+.settings-body input:focus {
+  border-color: rgba(235, 128, 84, 0.68);
+  box-shadow: 0 0 0 4px rgba(228, 122, 78, 0.13);
+}
+
+.settings-body .btn-add {
+  background: linear-gradient(135deg, #e37a4d, #ae422a);
+  box-shadow: 0 8px 18px rgba(178, 66, 39, 0.22);
+}
+
+.settings-body .term-item,
+.settings-body .feed-item,
+.settings-body .library-group {
+  border-color: rgba(255, 255, 255, 0.075);
+  background: rgba(255, 255, 255, 0.028);
+}
+
+.settings-body .term-item:hover,
+.settings-body .feed-item:hover,
+.settings-body .library-group[open] {
+  border-color: rgba(235, 128, 84, 0.26);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.settings-body .library-toolbar {
+  padding: 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  background: rgba(7, 9, 11, 0.26);
+}
+
+.settings-body .library-group-summary {
+  padding: 0.95rem 1rem;
+}
+
+.settings-body .library-row {
+  padding: 0.82rem 1rem;
+}
+
+.settings-body .library-row:hover {
+  background: rgba(228, 122, 78, 0.06);
+}
+
+.settings-sidebar {
+  position: sticky;
+  top: 6rem;
+}
+
+.settings-body .maintenance-actions {
+  gap: 0.6rem;
+}
+
+@media (max-width: 980px) {
+  .home-feature,
+  .settings-header-card,
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .home-feature-card {
+    justify-self: start;
+    width: min(210px, 100%);
+  }
+
+  .settings-sidebar {
+    position: static;
+  }
+}
+
+@media (max-width: 720px) {
+  body.catalog-body .page-shell,
+  .settings-body .page-shell {
+    width: min(100% - 1rem, 1480px);
+    padding-top: 0.45rem;
+  }
+
+  body.catalog-body .topbar {
+    top: 0.35rem;
+    min-height: 3.5rem;
+    padding: 0.5rem 0.55rem 0.5rem 0.7rem;
+  }
+
+  body.catalog-body .brand small {
+    display: none;
+  }
+
+  body.catalog-body .nav a {
+    padding: 0.45rem 0.58rem;
+    font-size: 0.78rem;
+  }
+
+  .home-feature {
+    min-height: 0;
+    padding: 1.15rem;
+    border-radius: 20px;
+  }
+
+  .home-feature-copy h1 {
+    font-size: clamp(2.1rem, 11vw, 3.2rem);
+  }
+
+  .journal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.62rem;
+  }
+
+  .status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .status-item {
+    min-height: 70px;
+  }
+
+  .settings-header-card,
+  .settings-body .settings-card {
+    border-radius: 17px;
+  }
+
+  .settings-header-copy h1 {
+    font-size: clamp(2rem, 10vw, 3.1rem);
+  }
+}
